@@ -1,4 +1,4 @@
-"""Main window controller — zone switching, sync, session expiry."""
+"""Main window controller — zone switching, sync, plan/apply, session expiry."""
 
 import logging
 from pathlib import Path
@@ -10,6 +10,7 @@ from config import SESSION_TIMEOUT_SECONDS
 from core.cloudflare_client import CloudflareClient, CloudflareAPIError
 from core.git_manager import GitManager
 from core.security import get_token, lock
+from core.sync_engine import SyncEngine
 from core.state_manager import (
     init_state_dir,
     list_synced_zones,
@@ -18,7 +19,9 @@ from core.state_manager import (
     set_config,
     get_config,
 )
+from gui.controllers.plan_controller import PlanController
 from gui.controllers.record_controller import RecordController
+from gui.controllers.record_editor_controller import RecordEditorController
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +34,7 @@ class MainController:
         self._token = token
         self._cf = CloudflareClient()
         self._git = GitManager()
+        self._engine = SyncEngine()
         self._record_ctrl: RecordController | None = None
 
         # Session expiry timer — check every 60 seconds
@@ -48,13 +52,20 @@ class MainController:
 
         # Buttons
         w.syncButton.clicked.connect(self._on_sync)
+        w.planButton.clicked.connect(self._on_plan)
         w.lockButton.clicked.connect(self._on_lock)
+        w.addRecordButton.clicked.connect(self._on_add_record)
+        w.editRecordButton.clicked.connect(self._on_edit_record)
+        w.deleteRecordButton.clicked.connect(self._on_delete_record)
 
         # Zone selector
         w.zoneComboBox.currentIndexChanged.connect(self._on_zone_changed)
 
         # Record controller (read-only table population)
         self._record_ctrl = RecordController(w)
+
+        # Enable edit/delete buttons when a row is selected
+        self._record_ctrl.connect_selection_changed(self._on_selection_changed)
 
         # Load cached zones into combo box
         self._populate_zone_combo()
@@ -144,6 +155,12 @@ class MainController:
             self._load_current_zone()
             w.statusbar.showMessage(f"Synced {len(zones)} zone(s)")
 
+            # Update drift badge (should be clean right after sync)
+            zone_name = w.zoneComboBox.currentText()
+            if zone_name:
+                w.driftBadge.setText("● Clean")
+                w.driftBadge.setStyleSheet("color: green; font-weight: bold;")
+
         except CloudflareAPIError as exc:
             QMessageBox.critical(w, "Sync Error", str(exc))
             w.statusbar.showMessage("Sync failed")
@@ -152,6 +169,134 @@ class MainController:
             w.statusbar.showMessage("Sync failed")
         finally:
             w.syncButton.setEnabled(True)
+
+    # ------------------------------------------------------------------
+    # Record CRUD
+    # ------------------------------------------------------------------
+
+    def _on_selection_changed(self) -> None:
+        has_sel = self._record_ctrl and self._record_ctrl.get_selected_record() is not None
+        self._window.editRecordButton.setEnabled(has_sel)
+        self._window.deleteRecordButton.setEnabled(has_sel)
+
+    def _current_zone_info(self) -> tuple[str, str] | None:
+        """Return (zone_name, zone_id) or None."""
+        zone_name = self._window.zoneComboBox.currentText()
+        if not zone_name:
+            QMessageBox.warning(self._window, "No Zone", "No zone selected. Sync first.")
+            return None
+        state = load_zone(zone_name)
+        if state is None:
+            QMessageBox.warning(self._window, "No Zone", "Zone not synced. Sync first.")
+            return None
+        return zone_name, state["zone_id"]
+
+    def _open_record_editor(self, existing: dict | None = None) -> dict | None:
+        """Open the record editor dialog and return the record dict, or None."""
+        info = self._current_zone_info()
+        if info is None:
+            return None
+        zone_name, _ = info
+
+        from PyQt6 import uic
+        dialog = uic.loadUi(str(Path(__file__).parent.parent / "ui" / "record_editor.ui"))
+        ctrl = RecordEditorController(dialog, zone_name, existing)
+        ctrl.setup()
+        dialog.exec()
+        return ctrl.result
+
+    def _on_add_record(self) -> None:
+        record = self._open_record_editor()
+        if record is None:
+            return
+        self._record_ctrl.add_record(record)
+        self._save_current_records()
+        self._window.statusbar.showMessage(f"Added {record['type']} {record['name']}")
+
+    def _on_edit_record(self) -> None:
+        old = self._record_ctrl.get_selected_record()
+        if old is None:
+            return
+        updated = self._open_record_editor(existing=old)
+        if updated is None:
+            return
+        self._record_ctrl.update_record(old, updated)
+        self._save_current_records()
+        self._window.statusbar.showMessage(f"Updated {updated['type']} {updated['name']}")
+
+    def _on_delete_record(self) -> None:
+        rec = self._record_ctrl.get_selected_record()
+        if rec is None:
+            return
+        answer = QMessageBox.question(
+            self._window, "Delete Record",
+            f"Delete {rec.get('type')} {rec.get('name')} → {rec.get('content')}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self._record_ctrl.delete_record(rec)
+        self._save_current_records()
+        self._window.editRecordButton.setEnabled(False)
+        self._window.deleteRecordButton.setEnabled(False)
+        self._window.statusbar.showMessage(f"Deleted {rec.get('type')} {rec.get('name')}")
+
+    def _save_current_records(self) -> None:
+        """Persist the current in-memory records back to the local zone JSON."""
+        info = self._current_zone_info()
+        if info is None:
+            return
+        zone_name, zone_id = info
+        records = self._record_ctrl.records
+        save_zone(zone_id, zone_name, records)
+        self._git.auto_init()
+        self._git.commit(f"Local record edit in {zone_name}")
+        self._window.driftBadge.setText("● Local changes")
+        self._window.driftBadge.setStyleSheet("color: blue; font-weight: bold;")
+
+    # ------------------------------------------------------------------
+    # Plan / Apply
+    # ------------------------------------------------------------------
+
+    def _on_plan(self) -> None:
+        """Open the plan preview dialog for the current zone."""
+        zone_name = self._window.zoneComboBox.currentText()
+        if not zone_name:
+            QMessageBox.warning(self._window, "Plan", "No zone selected. Sync first.")
+            return
+
+        token = self._ensure_token()
+        if token is None:
+            return
+
+        from PyQt6 import uic
+        dialog = uic.loadUi(str(Path(__file__).parent.parent / "ui" / "plan_dialog.ui"))
+        ctrl = PlanController(dialog, zone_name, token)
+        ctrl.setup()
+        dialog.exec()
+
+        # Refresh drift badge + records after dialog closes
+        if ctrl.applied:
+            self._load_current_zone()
+        self._update_drift_badge(zone_name, token)
+
+    def _update_drift_badge(self, zone_name: str, token: str) -> None:
+        """Check drift and update the toolbar badge."""
+        try:
+            drift = self._engine.detect_drift(zone_name, token)
+            w = self._window
+            if drift is None:
+                w.driftBadge.setText("● Unknown")
+                w.driftBadge.setStyleSheet("color: gray; font-weight: bold;")
+            elif drift.has_changes:
+                w.driftBadge.setText(f"● Drift ({drift.summary})")
+                w.driftBadge.setStyleSheet("color: orange; font-weight: bold;")
+            else:
+                w.driftBadge.setText("● Clean")
+                w.driftBadge.setStyleSheet("color: green; font-weight: bold;")
+        except Exception:
+            pass  # don't break UI on drift-check failure
 
     # ------------------------------------------------------------------
     # Lock

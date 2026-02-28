@@ -18,10 +18,13 @@ from core.state_manager import (
     save_zone,
     set_config,
 )
+from core.sync_engine import SyncEngine
+from gui.controllers.record_editor_controller import validate_record
 
 logger = logging.getLogger("dnsctl")
 _cf = CloudflareClient()
 _git = GitManager()
+_engine = SyncEngine()
 
 
 def _setup_logging(verbose: bool) -> None:
@@ -166,6 +169,295 @@ def sync(zone: str | None) -> None:
     cfg = get_config()
     if cfg.get("default_zone") is None and targets:
         set_config("default_zone", targets[0]["name"])
+
+
+# ======================================================================
+# Helpers for diff / plan output
+# ======================================================================
+
+def _resolve_zones(zone: str | None) -> list[str]:
+    """Resolve a zone argument to a list of zone names."""
+    if zone:
+        return [zone]
+    cfg = get_config()
+    default = cfg.get("default_zone")
+    if default:
+        return [default]
+    synced = list_synced_zones()
+    if not synced:
+        click.echo("No zones synced. Run 'dnscli sync' first.", err=True)
+        raise SystemExit(1)
+    return synced
+
+
+def _fmt_record(rec: dict) -> str:
+    """One-line summary of a record."""
+    parts = [f"{rec.get('type', '?'):6s}", rec.get("name", "?")]
+    content = rec.get("content", "")
+    if content:
+        parts.append(f"→ {content}")
+    ttl = rec.get("ttl", 1)
+    if ttl != 1:
+        parts.append(f"(TTL: {ttl})")
+    if rec.get("type") in ("MX", "SRV"):
+        parts.append(f"(pri: {rec.get('priority', 0)})")
+    return " ".join(parts)
+
+
+def _print_diff(drift) -> None:
+    """Print a DiffResult to stdout."""
+    if drift.added:
+        click.echo("  Added remotely:")
+        for r in drift.added:
+            click.echo(click.style(f"    + {_fmt_record(r)}", fg="cyan"))
+    if drift.modified:
+        click.echo("  Modified remotely:")
+        for m in drift.modified:
+            b, a = m["before"], m["after"]
+            click.echo(click.style(
+                f"    ~ {b.get('type', '?'):6s} {b.get('name', '?')}:  "
+                f"{b.get('content', '')} → {a.get('content', '')}",
+                fg="yellow",
+            ))
+    if drift.removed:
+        click.echo("  Removed remotely:")
+        for r in drift.removed:
+            click.echo(click.style(f"    - {_fmt_record(r)}", fg="red"))
+
+
+def _print_plan(plan) -> None:
+    """Print a Plan's actions to stdout."""
+    for a in plan.actions:
+        prot = " [PROTECTED]" if a.protected else ""
+        if a.action == "create":
+            click.echo(click.style(f"  + CREATE {_fmt_record(a.record)}{prot}", fg="green"))
+        elif a.action == "update":
+            before_content = (a.before or {}).get("content", "?")
+            click.echo(click.style(
+                f"  ~ UPDATE {a.record.get('type', '?'):6s} {a.record.get('name', '?')}:  "
+                f"{before_content} → {a.record.get('content', '')}{prot}",
+                fg="yellow",
+            ))
+        elif a.action == "delete":
+            click.echo(click.style(f"  - DELETE {_fmt_record(a.record)}{prot}", fg="red"))
+
+
+# ======================================================================
+# diff
+# ======================================================================
+
+@cli.command("diff")
+@click.option("--zone", "-z", default=None, help="Zone name.  Omit for default / all.")
+def diff_cmd(zone: str | None) -> None:
+    """Show drift between local state and Cloudflare."""
+    token = _require_token()
+    for z in _resolve_zones(zone):
+        drift = _engine.detect_drift(z, token)
+        if drift is None:
+            click.echo(f"{z}: Not synced yet.")
+            continue
+        if not drift.has_changes:
+            click.echo(f"{z}: Clean (no drift)")
+        else:
+            click.echo(f"{z}: Drift detected — {drift.summary}")
+            _print_diff(drift)
+
+
+# ======================================================================
+# plan
+# ======================================================================
+
+@cli.command("plan")
+@click.option("--zone", "-z", default=None, help="Zone name.  Omit for default / all.")
+def plan_cmd(zone: str | None) -> None:
+    """Show planned changes (what would be applied to Cloudflare)."""
+    token = _require_token()
+    for z in _resolve_zones(zone):
+        plan = _engine.generate_plan(z, token)
+        if not plan.has_changes:
+            msg = f"{z}: No changes to apply."
+            if plan.drift and plan.drift.has_changes:
+                msg += f"  (Drift detected: {plan.drift.summary} — run 'dnscli sync' to accept)"
+            click.echo(msg)
+        else:
+            click.echo(f"{z}: {plan.summary}")
+            _print_plan(plan)
+            if plan.has_protected:
+                n = sum(1 for a in plan.actions if a.protected)
+                click.echo(click.style(
+                    f"  ⚠ {n} protected record(s) will be skipped without --force",
+                    fg="yellow",
+                ))
+
+
+# ======================================================================
+# apply
+# ======================================================================
+
+@cli.command("apply")
+@click.option("--zone", "-z", default=None, help="Zone name.  Omit for default / all.")
+@click.option("--force", is_flag=True, help="Override protected-record guards.")
+@click.confirmation_option(prompt="Apply changes to Cloudflare?")
+def apply_cmd(zone: str | None, force: bool) -> None:
+    """Apply planned changes to Cloudflare."""
+    token = _require_token()
+    for z in _resolve_zones(zone):
+        plan = _engine.generate_plan(z, token)
+        if not plan.has_changes:
+            click.echo(f"{z}: No changes to apply.")
+            continue
+        click.echo(f"{z}: Applying {plan.summary} …")
+        result = _engine.apply_plan(plan, token, force=force)
+        if result.all_succeeded:
+            click.echo(f"  ✓ Applied {len(result.succeeded)} change(s).")
+        else:
+            click.echo(f"  {len(result.succeeded)} succeeded, {len(result.failed)} failed:")
+            for action, err in result.failed:
+                click.echo(click.style(
+                    f"    ✗ {action.action} {action.record.get('type')} "
+                    f"{action.record.get('name')}: {err}",
+                    fg="red",
+                ))
+
+
+# ======================================================================
+# add
+# ======================================================================
+
+def _resolve_single_zone(zone: str | None) -> str:
+    """Return exactly one zone name or abort."""
+    zones = _resolve_zones(zone)
+    if len(zones) != 1:
+        click.echo("Multiple zones found. Specify --zone.", err=True)
+        raise SystemExit(1)
+    return zones[0]
+
+
+@cli.command("add")
+@click.option("--zone", "-z", default=None, help="Zone name.")
+@click.option("--type", "rtype", required=True, type=click.Choice(["A", "AAAA", "CNAME", "MX", "TXT", "SRV"]), help="Record type.")
+@click.option("--name", "rname", required=True, help="Record name (e.g. sub.example.com).")
+@click.option("--content", required=True, help="Record content (IP, hostname, text value).")
+@click.option("--ttl", default=1, type=int, help="TTL (1 = Auto).")
+@click.option("--priority", default=10, type=int, help="Priority (MX/SRV only).")
+@click.option("--proxied", is_flag=True, help="Enable Cloudflare proxy (A/AAAA/CNAME).")
+def add_cmd(zone: str | None, rtype: str, rname: str, content: str,
+            ttl: int, priority: int, proxied: bool) -> None:
+    """Add a new DNS record to local state."""
+    zone_name = _resolve_single_zone(zone)
+    state = load_zone(zone_name)
+    if state is None:
+        click.echo(f"Zone '{zone_name}' not synced. Run 'dnscli sync' first.", err=True)
+        raise SystemExit(1)
+
+    # Auto-append zone name if bare subdomain
+    if rname and not rname.endswith(zone_name):
+        if "." not in rname or not rname.endswith("."):
+            rname = f"{rname}.{zone_name}"
+
+    record: dict = {"type": rtype, "name": rname, "content": content, "ttl": ttl, "proxied": proxied}
+    if rtype in ("MX", "SRV"):
+        record["priority"] = priority
+
+    err = validate_record(record)
+    if err:
+        click.echo(f"Validation error: {err}", err=True)
+        raise SystemExit(1)
+
+    records = state["records"]
+    records.append(record)
+    save_zone(state["zone_id"], zone_name, records)
+    _git.auto_init()
+    _git.commit(f"Add {rtype} {rname}")
+    click.echo(f"Added {rtype} {rname} → {content}")
+    click.echo("Run 'dnscli plan' to review, then 'dnscli apply' to push to Cloudflare.")
+
+
+# ======================================================================
+# edit
+# ======================================================================
+
+@cli.command("edit")
+@click.option("--zone", "-z", default=None, help="Zone name.")
+@click.option("--name", "rname", required=True, help="Name of the record to edit.")
+@click.option("--type", "rtype", required=True, type=click.Choice(["A", "AAAA", "CNAME", "MX", "TXT", "SRV"]), help="Record type.")
+@click.option("--content", default=None, help="New content value.")
+@click.option("--ttl", default=None, type=int, help="New TTL.")
+@click.option("--priority", default=None, type=int, help="New priority (MX/SRV).")
+@click.option("--proxied/--no-proxied", default=None, help="Cloudflare proxy toggle.")
+def edit_cmd(zone: str | None, rname: str, rtype: str, content: str | None,
+             ttl: int | None, priority: int | None, proxied: bool | None) -> None:
+    """Edit an existing DNS record in local state."""
+    zone_name = _resolve_single_zone(zone)
+    state = load_zone(zone_name)
+    if state is None:
+        click.echo(f"Zone '{zone_name}' not synced.", err=True)
+        raise SystemExit(1)
+
+    # Find matching record
+    matches = [r for r in state["records"]
+               if r.get("type") == rtype and r.get("name") == rname]
+    if not matches:
+        click.echo(f"No {rtype} record named '{rname}' found.", err=True)
+        raise SystemExit(1)
+    if len(matches) > 1:
+        click.echo(f"Multiple {rtype} records named '{rname}'. Edit in GUI for disambiguation.", err=True)
+        raise SystemExit(1)
+
+    rec = matches[0]
+    if content is not None:
+        rec["content"] = content
+    if ttl is not None:
+        rec["ttl"] = ttl
+    if priority is not None:
+        rec["priority"] = priority
+    if proxied is not None:
+        rec["proxied"] = proxied
+
+    err = validate_record(rec)
+    if err:
+        click.echo(f"Validation error: {err}", err=True)
+        raise SystemExit(1)
+
+    save_zone(state["zone_id"], zone_name, state["records"])
+    _git.auto_init()
+    _git.commit(f"Edit {rtype} {rname}")
+    click.echo(f"Updated {rtype} {rname}")
+    click.echo("Run 'dnscli plan' to review, then 'dnscli apply' to push to Cloudflare.")
+
+
+# ======================================================================
+# delete (record)
+# ======================================================================
+
+@cli.command("rm")
+@click.option("--zone", "-z", default=None, help="Zone name.")
+@click.option("--name", "rname", required=True, help="Record name to delete.")
+@click.option("--type", "rtype", required=True, type=click.Choice(["A", "AAAA", "CNAME", "MX", "TXT", "SRV"]), help="Record type.")
+@click.confirmation_option(prompt="Delete this record from local state?")
+def rm_cmd(zone: str | None, rname: str, rtype: str) -> None:
+    """Remove a DNS record from local state."""
+    zone_name = _resolve_single_zone(zone)
+    state = load_zone(zone_name)
+    if state is None:
+        click.echo(f"Zone '{zone_name}' not synced.", err=True)
+        raise SystemExit(1)
+
+    before = len(state["records"])
+    state["records"] = [r for r in state["records"]
+                        if not (r.get("type") == rtype and r.get("name") == rname)]
+    after = len(state["records"])
+
+    if before == after:
+        click.echo(f"No {rtype} record named '{rname}' found.", err=True)
+        raise SystemExit(1)
+
+    save_zone(state["zone_id"], zone_name, state["records"])
+    _git.auto_init()
+    _git.commit(f"Delete {rtype} {rname}")
+    removed = before - after
+    click.echo(f"Removed {removed} record(s): {rtype} {rname}")
+    click.echo("Run 'dnscli plan' to review, then 'dnscli apply' to push to Cloudflare.")
 
 
 # ======================================================================

@@ -65,6 +65,13 @@
        </widget>
       </item>
       <item>
+       <widget class="QPushButton" name="planButton">
+        <property name="text">
+         <string>Plan</string>
+        </property>
+       </widget>
+      </item>
+      <item>
        <widget class="QPushButton" name="lockButton">
         <property name="text">
          <string>Lock</string>
@@ -219,6 +226,53 @@
        </layout>
       </widget>
      </widget>
+    </item>
+    <item>
+     <layout class="QHBoxLayout" name="crudLayout">
+      <item>
+       <widget class="QPushButton" name="addRecordButton">
+        <property name="text">
+         <string>Add Record</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="editRecordButton">
+        <property name="text">
+         <string>Edit Record</string>
+        </property>
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="deleteRecordButton">
+        <property name="text">
+         <string>Delete Record</string>
+        </property>
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+        <property name="styleSheet">
+         <string>color: red;</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <spacer name="crudSpacer">
+        <property name="orientation">
+         <enum>Qt::Orientation::Horizontal</enum>
+        </property>
+        <property name="sizeHint" stdset="0">
+         <size>
+          <width>0</width>
+          <height>0</height>
+         </size>
+        </property>
+       </spacer>
+      </item>
+     </layout>
     </item>
    </layout>
   </widget>

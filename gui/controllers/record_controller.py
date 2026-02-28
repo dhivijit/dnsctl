@@ -1,4 +1,4 @@
-"""Record controller — populates QTableViews with DNS records (read-only for Phase 1)."""
+"""Record controller — populates QTableViews with DNS records, supports CRUD."""
 
 from PyQt6.QtCore import Qt, QAbstractTableModel, QModelIndex, QSortFilterProxyModel
 from PyQt6.QtWidgets import QMainWindow, QTableView, QHeaderView
@@ -115,3 +115,75 @@ class RecordController:
     def populate(self, records: list[dict]) -> None:
         """Replace the displayed records."""
         self._model.set_records(records)
+
+    @property
+    def records(self) -> list[dict]:
+        """Return the current records list."""
+        return list(self._model._records)
+
+    def get_selected_record(self) -> dict | None:
+        """Return the selected record from the currently visible table, or None."""
+        # Find which table is currently showing
+        tabs = self._window.recordTabs
+        current_widget = tabs.currentWidget()
+        if current_widget is None:
+            return None
+
+        # Find the QTableView inside the current tab
+        table: QTableView | None = None
+        for child in current_widget.findChildren(QTableView):
+            table = child
+            break
+        if table is None:
+            return None
+
+        indexes = table.selectionModel().selectedRows()
+        if not indexes:
+            return None
+
+        # Map proxy index → source index
+        proxy_idx = indexes[0]
+        proxy_model = table.model()
+        if isinstance(proxy_model, QSortFilterProxyModel):
+            source_idx = proxy_model.mapToSource(proxy_idx)
+        else:
+            source_idx = proxy_idx
+
+        row = source_idx.row()
+        if 0 <= row < len(self._model._records):
+            return self._model._records[row]
+        return None
+
+    def connect_selection_changed(self, callback) -> None:
+        """Connect selection-changed signals from all tables to *callback*."""
+        for widget_name in self._proxies:
+            table: QTableView = getattr(self._window, widget_name, None)
+            if table is not None and table.selectionModel():
+                table.selectionModel().selectionChanged.connect(
+                    lambda _sel, _desel, cb=callback: cb()
+                )
+
+    def add_record(self, record: dict) -> None:
+        """Append a record to the in-memory list."""
+        self._model.beginInsertRows(QModelIndex(), len(self._model._records), len(self._model._records))
+        self._model._records.append(record)
+        self._model.endInsertRows()
+
+    def update_record(self, old_record: dict, new_record: dict) -> None:
+        """Replace a record in-place by identity (id or reference)."""
+        for i, r in enumerate(self._model._records):
+            if r is old_record or (r.get('id') and r.get('id') == old_record.get('id')):
+                self._model._records[i] = new_record
+                tl = self._model.index(i, 0)
+                br = self._model.index(i, self._model.columnCount() - 1)
+                self._model.dataChanged.emit(tl, br)
+                return
+
+    def delete_record(self, record: dict) -> None:
+        """Remove a record from the in-memory list."""
+        for i, r in enumerate(self._model._records):
+            if r is record or (r.get('id') and r.get('id') == record.get('id')):
+                self._model.beginRemoveRows(QModelIndex(), i, i)
+                self._model._records.pop(i)
+                self._model.endRemoveRows()
+                return
