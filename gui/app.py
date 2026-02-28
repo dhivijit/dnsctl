@@ -3,6 +3,7 @@
 import sys
 from pathlib import Path
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
 from PyQt6 import uic
 
@@ -25,6 +26,25 @@ def _show_login_dialog(app: QApplication) -> bool:
     from core.cloudflare_client import CloudflareClient, sanitize_token
 
     dialog = _load_ui("login_dialog.ui")
+
+    def on_help():
+        from PyQt6.QtWidgets import QMessageBox
+        msg = QMessageBox(dialog)
+        msg.setWindowTitle("Create an API Token")
+        msg.setTextFormat(Qt.TextFormat.RichText)
+        msg.setText(
+            '<p>Create a token at:<br>'
+            '<a href="https://dash.cloudflare.com/profile/api-tokens">'
+            'https://dash.cloudflare.com/profile/api-tokens</a></p>'
+            '<p>Use <b>Custom Token</b> with these settings:</p>'
+            '<ul>'
+            '<li><b>Permissions:</b> Zone &rarr; DNS &rarr; Edit</li>'
+            '<li><b>Zone Resources:</b> Include &rarr; All Zones</li>'
+            '</ul>'
+        )
+        msg.exec()
+
+    dialog.helpButton.clicked.connect(on_help)
 
     def on_login():
         raw_token = dialog.tokenEdit.text().strip()
