@@ -163,6 +163,15 @@ class RecordController:
                     lambda _sel, _desel, cb=callback: cb()
                 )
 
+    def connect_double_click(self, callback) -> None:
+        """Connect doubleClicked signals from all tables to *callback*."""
+        for widget_name in self._proxies:
+            table: QTableView = getattr(self._window, widget_name, None)
+            if table is not None:
+                table.doubleClicked.connect(
+                    lambda _index, cb=callback: cb()
+                )
+
     def add_record(self, record: dict) -> None:
         """Append a record to the in-memory list."""
         self._model.beginInsertRows(QModelIndex(), len(self._model._records), len(self._model._records))

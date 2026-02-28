@@ -11,7 +11,9 @@ from core.cloudflare_client import CloudflareClient, sanitize_token
 from core.git_manager import GitManager
 from core.security import get_token, is_logged_in, lock, login, logout, unlock
 from core.state_manager import (
+    export_zone,
     get_config,
+    import_zone,
     init_state_dir,
     list_synced_zones,
     load_zone,
@@ -458,6 +460,111 @@ def rm_cmd(zone: str | None, rname: str, rtype: str) -> None:
     removed = before - after
     click.echo(f"Removed {removed} record(s): {rtype} {rname}")
     click.echo("Run 'dnscli plan' to review, then 'dnscli apply' to push to Cloudflare.")
+
+
+# ======================================================================
+# rollback
+# ======================================================================
+
+@cli.command("rollback")
+@click.argument("commit")
+def rollback_cmd(commit: str) -> None:
+    """Rollback state to a previous git commit."""
+    _require_token()
+    _git.auto_init()
+
+    history = _git.log()
+    if not history:
+        click.echo("No git history found. Nothing to roll back to.", err=True)
+        raise SystemExit(1)
+
+    # Validate the commit exists in our history
+    known_shas = {c["sha"] for c in history} | {c["short_sha"] for c in history}
+    if commit not in known_shas:
+        click.echo(f"Commit '{commit}' not found in dnsctl history.", err=True)
+        click.echo("Use 'dnscli log' to see available commits.")
+        raise SystemExit(1)
+
+    try:
+        new_sha = _git.rollback(commit)
+        click.echo(f"Rolled back to {commit}")
+        click.echo(f"New commit: {new_sha[:8]}")
+        click.echo("Run 'dnscli plan' to review, then 'dnscli apply' to push to Cloudflare.")
+    except ValueError as exc:
+        click.echo(str(exc), err=True)
+        raise SystemExit(1)
+
+
+# ======================================================================
+# log
+# ======================================================================
+
+@cli.command("log")
+@click.option("--count", "-n", default=20, type=int, help="Number of commits to show.")
+def log_cmd(count: int) -> None:
+    """Show git commit history for the state directory."""
+    _git.auto_init()
+    history = _git.log(max_count=count)
+    if not history:
+        click.echo("No history yet.")
+        return
+    for entry in history:
+        click.echo(
+            f"{entry['short_sha']}  {entry['date'][:19]}  {entry['message']}"
+        )
+
+
+# ======================================================================
+# export
+# ======================================================================
+
+@cli.command("export")
+@click.option("--zone", "-z", default=None, help="Zone name to export.")
+@click.option("--output", "-o", "outfile", default=None, type=click.Path(), help="Output file path.")
+def export_cmd(zone: str | None, outfile: str | None) -> None:
+    """Export a zone's state to a JSON file."""
+    from pathlib import Path
+
+    zone_name = _resolve_single_zone(zone)
+
+    if outfile is None:
+        outfile = f"{zone_name}.export.json"
+    dest = Path(outfile)
+
+    try:
+        export_zone(zone_name, dest)
+        click.echo(f"Exported {zone_name} → {dest}")
+    except FileNotFoundError as exc:
+        click.echo(str(exc), err=True)
+        raise SystemExit(1)
+
+
+# ======================================================================
+# import
+# ======================================================================
+
+@cli.command("import")
+@click.argument("file", type=click.Path(exists=True))
+def import_cmd(file: str) -> None:
+    """Import zone state from a JSON file."""
+    from pathlib import Path
+
+    init_state_dir()
+    src = Path(file)
+
+    try:
+        state = import_zone(src)
+        zone_name = state["zone_name"]
+        n = len(state.get("records", []))
+        click.echo(f"Imported {zone_name} ({n} records)")
+
+        _git.auto_init()
+        sha = _git.commit(f"Imported state for {zone_name}")
+        if sha:
+            click.echo(f"Committed: {sha[:8]}")
+    except ValueError as exc:
+        click.echo(str(exc), err=True)
+        raise SystemExit(1)
 
 
 # ======================================================================

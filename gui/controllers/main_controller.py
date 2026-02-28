@@ -22,6 +22,7 @@ from core.state_manager import (
 from gui.controllers.plan_controller import PlanController
 from gui.controllers.record_controller import RecordController
 from gui.controllers.record_editor_controller import RecordEditorController
+from gui.controllers.history_controller import HistoryController
 
 logger = logging.getLogger(__name__)
 
@@ -53,10 +54,13 @@ class MainController:
         # Buttons
         w.syncButton.clicked.connect(self._on_sync)
         w.planButton.clicked.connect(self._on_plan)
+        w.historyButton.clicked.connect(self._on_history)
         w.lockButton.clicked.connect(self._on_lock)
         w.addRecordButton.clicked.connect(self._on_add_record)
         w.editRecordButton.clicked.connect(self._on_edit_record)
         w.deleteRecordButton.clicked.connect(self._on_delete_record)
+        w.importButton.clicked.connect(self._on_import)
+        w.exportButton.clicked.connect(self._on_export)
 
         # Zone selector
         w.zoneComboBox.currentIndexChanged.connect(self._on_zone_changed)
@@ -67,6 +71,9 @@ class MainController:
         # Enable edit/delete buttons when a row is selected
         self._record_ctrl.connect_selection_changed(self._on_selection_changed)
 
+        # Double-click a record to open the editor
+        self._record_ctrl.connect_double_click(self._on_edit_record)
+
         # Load cached zones into combo box
         self._populate_zone_combo()
 
@@ -76,7 +83,11 @@ class MainController:
         # Start session timer
         self._session_timer.start()
 
+        # Auto-sync on startup
+        self._on_sync()
+
         w.statusbar.showMessage("Ready")
+
 
     # ------------------------------------------------------------------
     # Zone combo population
@@ -116,7 +127,8 @@ class MainController:
         if state and self._record_ctrl:
             self._record_ctrl.populate(state.get("records", []))
             ts = state.get("last_synced_at", "never")
-            self._window.statusbar.showMessage(f"{zone_name} — {len(state.get('records', []))} records — last sync: {ts}")
+            self._window.statusbar.showMessage(
+                f"{zone_name} — {len(state.get('records', []))} records — last sync: {ts}")
 
     # ------------------------------------------------------------------
     # Sync
@@ -134,7 +146,8 @@ class MainController:
         try:
             zones = self._cf.list_zones(token)
             if not zones:
-                QMessageBox.warning(w, "Sync", "No zones found for this API token.")
+                QMessageBox.warning(
+                    w, "Sync", "No zones found for this API token.")
                 return
 
             init_state_dir()
@@ -183,11 +196,13 @@ class MainController:
         """Return (zone_name, zone_id) or None."""
         zone_name = self._window.zoneComboBox.currentText()
         if not zone_name:
-            QMessageBox.warning(self._window, "No Zone", "No zone selected. Sync first.")
+            QMessageBox.warning(self._window, "No Zone",
+                                "No zone selected. Sync first.")
             return None
         state = load_zone(zone_name)
         if state is None:
-            QMessageBox.warning(self._window, "No Zone", "Zone not synced. Sync first.")
+            QMessageBox.warning(self._window, "No Zone",
+                                "Zone not synced. Sync first.")
             return None
         return zone_name, state["zone_id"]
 
@@ -199,7 +214,8 @@ class MainController:
         zone_name, _ = info
 
         from PyQt6 import uic
-        dialog = uic.loadUi(str(Path(__file__).parent.parent / "ui" / "record_editor.ui"))
+        dialog = uic.loadUi(
+            str(Path(__file__).parent.parent / "ui" / "record_editor.ui"))
         ctrl = RecordEditorController(dialog, zone_name, existing)
         ctrl.setup()
         dialog.exec()
@@ -211,7 +227,8 @@ class MainController:
             return
         self._record_ctrl.add_record(record)
         self._save_current_records()
-        self._window.statusbar.showMessage(f"Added {record['type']} {record['name']}")
+        self._window.statusbar.showMessage(
+            f"Added {record['type']} {record['name']}")
 
     def _on_edit_record(self) -> None:
         old = self._record_ctrl.get_selected_record()
@@ -222,7 +239,8 @@ class MainController:
             return
         self._record_ctrl.update_record(old, updated)
         self._save_current_records()
-        self._window.statusbar.showMessage(f"Updated {updated['type']} {updated['name']}")
+        self._window.statusbar.showMessage(
+            f"Updated {updated['type']} {updated['name']}")
 
     def _on_delete_record(self) -> None:
         rec = self._record_ctrl.get_selected_record()
@@ -240,7 +258,8 @@ class MainController:
         self._save_current_records()
         self._window.editRecordButton.setEnabled(False)
         self._window.deleteRecordButton.setEnabled(False)
-        self._window.statusbar.showMessage(f"Deleted {rec.get('type')} {rec.get('name')}")
+        self._window.statusbar.showMessage(
+            f"Deleted {rec.get('type')} {rec.get('name')}")
 
     def _save_current_records(self) -> None:
         """Persist the current in-memory records back to the local zone JSON."""
@@ -253,7 +272,8 @@ class MainController:
         self._git.auto_init()
         self._git.commit(f"Local record edit in {zone_name}")
         self._window.driftBadge.setText("● Local changes")
-        self._window.driftBadge.setStyleSheet("color: blue; font-weight: bold;")
+        self._window.driftBadge.setStyleSheet(
+            "color: blue; font-weight: bold;")
 
     # ------------------------------------------------------------------
     # Plan / Apply
@@ -263,7 +283,8 @@ class MainController:
         """Open the plan preview dialog for the current zone."""
         zone_name = self._window.zoneComboBox.currentText()
         if not zone_name:
-            QMessageBox.warning(self._window, "Plan", "No zone selected. Sync first.")
+            QMessageBox.warning(self._window, "Plan",
+                                "No zone selected. Sync first.")
             return
 
         token = self._ensure_token()
@@ -271,7 +292,8 @@ class MainController:
             return
 
         from PyQt6 import uic
-        dialog = uic.loadUi(str(Path(__file__).parent.parent / "ui" / "plan_dialog.ui"))
+        dialog = uic.loadUi(
+            str(Path(__file__).parent.parent / "ui" / "plan_dialog.ui"))
         ctrl = PlanController(dialog, zone_name, token)
         ctrl.setup()
         dialog.exec()
@@ -299,13 +321,99 @@ class MainController:
             pass  # don't break UI on drift-check failure
 
     # ------------------------------------------------------------------
+    # History / Rollback
+    # ------------------------------------------------------------------
+
+    def _on_history(self) -> None:
+        """Open the history/rollback dialog."""
+        from PyQt6 import uic
+        dialog = uic.loadUi(
+            str(Path(__file__).parent.parent / "ui" / "history_dialog.ui"))
+        ctrl = HistoryController(dialog)
+        ctrl.setup()
+        dialog.exec()
+
+        # If a rollback was performed, refresh zone data
+        if ctrl.rolled_back:
+            self._populate_zone_combo()
+            self._load_current_zone()
+            self._window.driftBadge.setText("● Local changes")
+            self._window.driftBadge.setStyleSheet(
+                "color: blue; font-weight: bold;")
+            self._window.statusbar.showMessage(
+                "Rolled back — review with Plan")
+
+    # ------------------------------------------------------------------
+    # Export
+    # ------------------------------------------------------------------
+
+    def _on_export(self) -> None:
+        """Export the current zone state to a JSON file."""
+        from PyQt6.QtWidgets import QFileDialog
+        from core.state_manager import export_zone
+
+        zone_name = self._window.zoneComboBox.currentText()
+        if not zone_name:
+            QMessageBox.warning(self._window, "Export",
+                                "No zone selected. Sync first.")
+            return
+
+        dest, _ = QFileDialog.getSaveFileName(
+            self._window, "Export Zone State",
+            f"{zone_name}.export.json",
+            "JSON Files (*.json)",
+        )
+        if not dest:
+            return
+
+        try:
+            export_zone(zone_name, Path(dest))
+            self._window.statusbar.showMessage(
+                f"Exported {zone_name} \u2192 {dest}")
+        except FileNotFoundError as exc:
+            QMessageBox.critical(self._window, "Export Error", str(exc))
+
+    # ------------------------------------------------------------------
+    # Import
+    # ------------------------------------------------------------------
+
+    def _on_import(self) -> None:
+        """Import zone state from a JSON file."""
+        from PyQt6.QtWidgets import QFileDialog
+        from core.state_manager import import_zone
+
+        path, _ = QFileDialog.getOpenFileName(
+            self._window, "Import Zone State", "", "JSON Files (*.json)"
+        )
+        if not path:
+            return
+
+        try:
+            state = import_zone(Path(path))
+            zone_name = state["zone_name"]
+            n = len(state.get("records", []))
+            self._git.auto_init()
+            self._git.commit(f"Imported state for {zone_name}")
+            self._populate_zone_combo()
+            self._window.zoneComboBox.setCurrentText(zone_name)
+            self._load_current_zone()
+            self._window.driftBadge.setText("● Local changes")
+            self._window.driftBadge.setStyleSheet(
+                "color: blue; font-weight: bold;")
+            self._window.statusbar.showMessage(
+                f"Imported {zone_name} ({n} records)")
+        except ValueError as exc:
+            QMessageBox.critical(self._window, "Import Error", str(exc))
+
+    # ------------------------------------------------------------------
     # Lock
     # ------------------------------------------------------------------
 
     def _on_lock(self) -> None:
         lock()
         self._token = ""
-        QMessageBox.information(self._window, "Locked", "Session locked.  Restart the application to unlock.")
+        QMessageBox.information(
+            self._window, "Locked", "Session locked.  Restart the application to unlock.")
         self._window.close()
 
     # ------------------------------------------------------------------

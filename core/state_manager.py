@@ -1,4 +1,4 @@
-"""State manager — initialise state directory, load/save zone JSON."""
+"""State manager — initialise state directory, load/save zone JSON, export/import."""
 
 import hashlib
 import json
@@ -66,8 +66,18 @@ def load_zone(zone_name: str) -> dict | None:
 def save_zone(zone_id: str, zone_name: str, records: list[dict]) -> dict:
     """Persist zone state to ``~/.dnsctl/zones/<zone_name>.json``.
 
+    If the records haven't changed since the last save (same hash),
+    the file is **not** rewritten so git sees no diff.
+
     Returns the saved state dict (including computed hash).
     """
+    new_hash = _compute_hash(records)
+
+    # Skip rewrite if records are identical (avoids timestamp-only diffs)
+    existing = load_zone(zone_name)
+    if existing and existing.get("state_hash") == new_hash:
+        return existing
+
     state = {
         "zone_id": zone_id,
         "zone_name": zone_name,
@@ -111,3 +121,47 @@ def _compute_hash(records: list[dict]) -> str:
     """Deterministic SHA-256 hash of the records list."""
     canonical = json.dumps(records, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+# ------------------------------------------------------------------
+# Export / Import
+# ------------------------------------------------------------------
+
+def export_zone(zone_name: str, dest: Path) -> Path:
+    """Export a zone's state to *dest* as a standalone JSON file.
+
+    Raises ``FileNotFoundError`` if the zone hasn't been synced.
+    Returns the written path.
+    """
+    state = load_zone(zone_name)
+    if state is None:
+        raise FileNotFoundError(f"Zone '{zone_name}' has not been synced yet.")
+    dest.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    return dest
+
+
+def import_zone(src: Path) -> dict:
+    """Import zone state from a JSON file and save it into the state directory.
+
+    The file must contain ``zone_id``, ``zone_name``, and ``records``.
+    Returns the saved state dict.
+
+    Raises ``ValueError`` for invalid files.
+    """
+    try:
+        data = json.loads(src.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        raise ValueError(f"Cannot read import file: {exc}") from exc
+
+    zone_id = data.get("zone_id")
+    zone_name = data.get("zone_name")
+    records = data.get("records")
+
+    if not zone_id or not zone_name or records is None:
+        raise ValueError(
+            "Import file must contain 'zone_id', 'zone_name', and 'records'."
+        )
+    if not isinstance(records, list):
+        raise ValueError("'records' must be a list.")
+
+    return save_zone(zone_id, zone_name, records)
