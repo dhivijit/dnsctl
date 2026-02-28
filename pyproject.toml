@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dnsctl"
+version = "0.1.0"
+description = "Version-controlled Cloudflare DNS manager with CLI and GUI"
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.31",
+    "cryptography>=41.0",
+    "keyring>=24.0",
+    "click>=8.1",
+    "PyQt6>=6.6",
+    "GitPython>=3.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pyinstaller>=6.0",
+]
+
+[project.scripts]
+dnscli = "cli.main:cli"
+
+[project.gui-scripts]
+dnscli-g = "gui.app:main"
+
+[tool.setuptools.packages.find]
+include = ["cli*", "gui*", "core*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
