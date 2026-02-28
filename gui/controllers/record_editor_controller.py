@@ -6,6 +6,7 @@ import re
 from PyQt6.QtWidgets import QDialog
 
 from config import SUPPORTED_RECORD_TYPES
+from core.state_manager import load_protected_records
 
 logger = logging.getLogger(__name__)
 
@@ -57,10 +58,17 @@ class RecordEditorController:
         self._zone_name = zone_name
         self._existing = existing  # None = add, dict = edit
         self._result: dict | None = None
+        self._protect_changed: tuple[bool, bool, str] | None = None
+        self._was_protected = False
 
     @property
     def result(self) -> dict | None:
         return self._result
+
+    @property
+    def protect_changed(self) -> tuple[bool, bool, str] | None:
+        """Return (was_protected, is_protected, reason) if protect state changed, else None."""
+        return self._protect_changed
 
     def setup(self) -> None:
         d = self._dialog
@@ -75,12 +83,18 @@ class RecordEditorController:
         d.saveButton.clicked.connect(self._on_save)
         d.cancelButton.clicked.connect(d.reject)
 
+        # Wire protected checkbox to show/hide reason field
+        d.protectedCheck.toggled.connect(self._on_protected_toggled)
+
         # Pre-populate for edit mode
         if self._existing:
             self._populate_from_record(self._existing)
             # Don't allow changing type when editing
             d.typeCombo.setEnabled(False)
         else:
+            # Hide reason field initially
+            d.reasonLabel.setVisible(False)
+            d.reasonEdit.setVisible(False)
             self._on_type_changed(d.typeCombo.currentText())
 
     def _on_type_changed(self, rtype: str) -> None:
@@ -104,6 +118,10 @@ class RecordEditorController:
         }
         d.contentEdit.setPlaceholderText(hints.get(rtype, ""))
 
+    def _on_protected_toggled(self, checked: bool) -> None:
+        self._dialog.reasonLabel.setVisible(checked)
+        self._dialog.reasonEdit.setVisible(checked)
+
     def _populate_from_record(self, rec: dict) -> None:
         d = self._dialog
         # Type
@@ -117,6 +135,23 @@ class RecordEditorController:
         d.ttlSpin.setValue(rec.get("ttl", 1))
         d.proxiedCheck.setChecked(rec.get("proxied", False))
         d.prioritySpin.setValue(rec.get("priority", 10))
+
+        # Check if record is currently protected
+        rtype = rec.get("type", "")
+        rname = rec.get("name", "")
+        protected = load_protected_records()
+        self._was_protected = any(
+            p.get("type") == rtype and p.get("name") == rname for p in protected
+        )
+        d.protectedCheck.setChecked(self._was_protected)
+        # Find existing reason
+        reason = ""
+        for p in protected:
+            if p.get("type") == rtype and p.get("name") == rname:
+                reason = p.get("reason", "")
+                break
+        d.reasonEdit.setText(reason)
+        self._on_protected_toggled(self._was_protected)
 
     def _on_save(self) -> None:
         d = self._dialog
@@ -150,6 +185,15 @@ class RecordEditorController:
         if err:
             d.errorLabel.setText(err)
             return
+
+        # Track protect state change
+        is_protected = d.protectedCheck.isChecked()
+        reason = d.reasonEdit.text().strip()
+        if is_protected != self._was_protected:
+            self._protect_changed = (self._was_protected, is_protected, reason)
+        elif is_protected and self._was_protected:
+            # Reason may have changed
+            self._protect_changed = (True, True, reason)
 
         self._result = record
         d.accept()

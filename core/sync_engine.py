@@ -1,14 +1,12 @@
 """Sync engine — orchestrate plan generation and application."""
 
-import json
 import logging
 from dataclasses import dataclass, field
 
-from config import METADATA_FILE
 from core.cloudflare_client import CloudflareClient, CloudflareAPIError
 from core.diff_engine import DiffResult, compute_diff, is_protected
 from core.git_manager import GitManager
-from core.state_manager import load_zone, save_zone
+from core.state_manager import load_protected_records, load_zone, save_zone
 
 logger = logging.getLogger(__name__)
 
@@ -72,20 +70,6 @@ class ApplyResult:
         return len(self.failed) == 0
 
 
-# ------------------------------------------------------------------
-# Helpers
-# ------------------------------------------------------------------
-
-def _load_protected_records() -> list[dict]:
-    """Load user-defined protected records from ``metadata.json``."""
-    if not METADATA_FILE.exists():
-        return []
-    try:
-        data = json.loads(METADATA_FILE.read_text(encoding="utf-8"))
-        return data.get("protected_records", [])
-    except (json.JSONDecodeError, OSError):
-        return []
-
 
 # ------------------------------------------------------------------
 # Engine
@@ -147,7 +131,7 @@ class SyncEngine:
         #   modified → both have it, before=remote, after=local → UPDATE
         diff = compute_diff(remote_records, local_records)
 
-        user_protected = _load_protected_records()
+        user_protected = load_protected_records()
         actions: list[PlanAction] = []
 
         for rec in diff.added:

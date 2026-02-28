@@ -58,8 +58,14 @@ CLI and GUI share the same core engine — no business logic in the UI layer.
 **Requirements:** Python 3.11+
 
 ```bash
+# Install in development mode
+pip install -e .
+
+# Or install dependencies directly
 pip install -r requirements.txt
 ```
+
+Run the CLI with `python -m cli.main` or the GUI with `python -m gui.app`.
 
 ### Dependencies
 
@@ -152,6 +158,43 @@ dnscli apply --yes
 dnscli apply --yes --force
 ```
 
+### History / Rollback
+
+```bash
+# Show commit history
+dnscli log
+dnscli log -n 50
+
+# Rollback to a previous state (creates a new commit, no history lost)
+dnscli rollback abc12345
+```
+
+### Export / Import
+
+```bash
+# Export current zone state to a file
+dnscli export
+dnscli export -z example.com -o backup.json
+
+# Import zone state from a file
+dnscli import backup.json
+```
+
+### Protected Records
+
+```bash
+# Mark a record as protected (requires --force to modify during apply)
+dnscli protect --type A --name example.com --reason "Production IP"
+
+# Remove protection
+dnscli unprotect --type A --name example.com
+
+# List all protected records
+dnscli protected
+```
+
+NS records are always system-protected regardless of user settings.
+
 ---
 
 ## GUI
@@ -169,15 +212,18 @@ python -m gui.app
 - **Zone Selector** — Switch between all synced zones
 - **Drift Badge** — Shows sync status: Clean (green), Drift (orange), Local changes (blue)
 - **Record Tabs** — View records filtered by type: All, A, AAAA, CNAME, MX, TXT, SRV
-- **Sync** — Pull latest state from Cloudflare
+- **Sync** — Pull latest state from Cloudflare (auto-runs on startup)
 - **Plan** — Opens a dialog previewing all planned changes with a rich HTML diff
+- **History** — Browse git commit history, preview past states, and rollback
 - **Lock** — Lock the session and close
 
 ### Record Editing
 
 - **Add Record** — Opens a form to create a new record (type, name, content, TTL, priority, proxied)
-- **Edit Record** — Select a row, click Edit to modify it
+- **Edit Record** — Select a row and click Edit, or double-click a row to modify it
 - **Delete Record** — Select a row, click Delete with confirmation
+- **Import** — Load zone state from a JSON file
+- **Export** — Save current zone state to a JSON file
 
 ### Plan Preview Dialog
 
@@ -202,6 +248,12 @@ python -m gui.app
 - Encrypted blob stored in OS keyring (Windows Credential Locker / macOS Keychain / Linux Secret Service)
 - Session auto-expires after 15 minutes of inactivity
 - Token input is sanitized — rejects pasted curl commands or Bearer headers
+
+---
+
+## Logging
+
+All warnings and errors are logged to `~/.dnsctl/logs/dnsctl.log` in addition to stderr. Use `--verbose` with the CLI for debug-level output.
 
 ---
 

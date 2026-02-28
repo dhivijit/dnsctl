@@ -1,5 +1,6 @@
 """dnscli-g — PyQt6 GUI entry point."""
 
+import logging
 import sys
 from pathlib import Path
 
@@ -7,6 +8,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
 from PyQt6 import uic
 
+from config import LOG_FILE
 from core.security import get_token, is_logged_in
 from core.state_manager import init_state_dir
 from gui.controllers.main_controller import MainController
@@ -150,6 +152,16 @@ def _show_unlock_dialog(app: QApplication) -> str | None:
 
 def main() -> None:
     init_state_dir()
+
+    # Set up file logging
+    handlers: list[logging.Handler] = [logging.StreamHandler(sys.stderr)]
+    if LOG_FILE.parent.exists():
+        handlers.append(logging.FileHandler(str(LOG_FILE), encoding="utf-8"))
+    logging.basicConfig(
+        level=logging.WARNING,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        handlers=handlers,
+    )
 
     app = QApplication(sys.argv)
     app.setApplicationName("DNSCTL")

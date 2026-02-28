@@ -4,9 +4,10 @@ from PyQt6.QtCore import Qt, QAbstractTableModel, QModelIndex, QSortFilterProxyM
 from PyQt6.QtWidgets import QMainWindow, QTableView, QHeaderView
 
 from config import SUPPORTED_RECORD_TYPES
+from core.state_manager import load_protected_records
 
 # Column definitions for the record table
-_COLUMNS = ("Type", "Name", "Content", "TTL", "Priority", "Proxied")
+_COLUMNS = ("Type", "Name", "Content", "TTL", "Priority", "Proxied", "Protected")
 
 
 class RecordTableModel(QAbstractTableModel):
@@ -15,11 +16,28 @@ class RecordTableModel(QAbstractTableModel):
     def __init__(self, records: list[dict] | None = None) -> None:
         super().__init__()
         self._records: list[dict] = records or []
+        self._protected_set: set[tuple[str, str]] = set()
 
     def set_records(self, records: list[dict]) -> None:
         self.beginResetModel()
         self._records = list(records)
+        self._refresh_protected()
         self.endResetModel()
+
+    def _refresh_protected(self) -> None:
+        """Reload the protected records set from state."""
+        protected = load_protected_records()
+        self._protected_set = {
+            (p.get("type", ""), p.get("name", "")) for p in protected
+        }
+
+    def refresh_protected(self) -> None:
+        """Public: re-read protected list and repaint the table."""
+        self._refresh_protected()
+        if self._records:
+            tl = self.index(0, 0)
+            br = self.index(self.rowCount() - 1, self.columnCount() - 1)
+            self.dataChanged.emit(tl, br)
 
     # -- QAbstractTableModel interface --
 
@@ -52,6 +70,9 @@ class RecordTableModel(QAbstractTableModel):
             return str(rec.get("priority", "")) if rec.get("type") in ("MX", "SRV") else ""
         if col == 5:
             return "Yes" if rec.get("proxied") else "No"
+        if col == 6:
+            key = (rec.get("type", ""), rec.get("name", ""))
+            return "\U0001f6e1" if key in self._protected_set else ""
         return None
 
     def flags(self, index: QModelIndex) -> Qt.ItemFlag:
@@ -115,6 +136,10 @@ class RecordController:
     def populate(self, records: list[dict]) -> None:
         """Replace the displayed records."""
         self._model.set_records(records)
+
+    def refresh_protected(self) -> None:
+        """Refresh the protected column after protect/unprotect changes."""
+        self._model.refresh_protected()
 
     @property
     def records(self) -> list[dict]:

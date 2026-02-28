@@ -106,9 +106,24 @@ class CloudflareClient:
         headers = self._headers(token)
 
         for attempt in range(_MAX_RETRIES):
-            resp = self._session.request(
-                method, url, headers=headers, params=params, json=json_body, timeout=30
-            )
+            try:
+                resp = self._session.request(
+                    method, url, headers=headers, params=params, json=json_body, timeout=30
+                )
+            except requests.ConnectionError as exc:
+                if attempt < _MAX_RETRIES - 1:
+                    wait = _BACKOFF_BASE * (2 ** attempt)
+                    logger.warning("Connection error, retrying in %.1fs: %s", wait, exc)
+                    time.sleep(wait)
+                    continue
+                raise CloudflareAPIError(0, [{"message": f"Connection failed: {exc}"}]) from exc
+            except requests.Timeout as exc:
+                if attempt < _MAX_RETRIES - 1:
+                    wait = _BACKOFF_BASE * (2 ** attempt)
+                    logger.warning("Request timed out, retrying in %.1fs: %s", wait, exc)
+                    time.sleep(wait)
+                    continue
+                raise CloudflareAPIError(0, [{"message": f"Request timed out: {exc}"}]) from exc
 
             if resp.status_code == 429:
                 wait = _BACKOFF_BASE * (2 ** attempt)

@@ -29,7 +29,7 @@ dnscli = "cli.main:cli"
 dnscli-g = "gui.app:main"
 
 [tool.setuptools.packages.find]
-include = ["cli*", "gui*", "core*"]
+include = ["cli*", "gui*", "core*", "config*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

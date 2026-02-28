@@ -165,3 +165,51 @@ def import_zone(src: Path) -> dict:
         raise ValueError("'records' must be a list.")
 
     return save_zone(zone_id, zone_name, records)
+
+
+# ------------------------------------------------------------------
+# Protected records management
+# ------------------------------------------------------------------
+
+def load_protected_records() -> list[dict]:
+    """Return the list of user-defined protected records from metadata.json."""
+    if not METADATA_FILE.exists():
+        return []
+    try:
+        data = json.loads(METADATA_FILE.read_text(encoding="utf-8"))
+        return data.get("protected_records", [])
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+def add_protected_record(rtype: str, name: str, reason: str = "") -> list[dict]:
+    """Add a record to the protected list. Returns the updated list."""
+    protected = load_protected_records()
+    # Don't add duplicates
+    for p in protected:
+        if p.get("type") == rtype and p.get("name") == name:
+            return protected
+    protected.append({"type": rtype, "name": name, "reason": reason})
+    _save_metadata(protected)
+    return protected
+
+
+def remove_protected_record(rtype: str, name: str) -> list[dict]:
+    """Remove a record from the protected list. Returns the updated list."""
+    protected = load_protected_records()
+    protected = [p for p in protected
+                 if not (p.get("type") == rtype and p.get("name") == name)]
+    _save_metadata(protected)
+    return protected
+
+
+def _save_metadata(protected: list[dict]) -> None:
+    """Write the protected records list back to metadata.json."""
+    data: dict = {}
+    if METADATA_FILE.exists():
+        try:
+            data = json.loads(METADATA_FILE.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            data = {}
+    data["protected_records"] = protected
+    METADATA_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")

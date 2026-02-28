@@ -6,17 +6,20 @@ import sys
 
 import click
 
-from config import STATE_DIR
+from config import LOG_FILE, STATE_DIR
 from core.cloudflare_client import CloudflareClient, sanitize_token
 from core.git_manager import GitManager
 from core.security import get_token, is_logged_in, lock, login, logout, unlock
 from core.state_manager import (
+    add_protected_record,
     export_zone,
     get_config,
     import_zone,
     init_state_dir,
     list_synced_zones,
+    load_protected_records,
     load_zone,
+    remove_protected_record,
     save_zone,
     set_config,
 )
@@ -31,10 +34,14 @@ _engine = SyncEngine()
 
 def _setup_logging(verbose: bool) -> None:
     level = logging.DEBUG if verbose else logging.WARNING
+    handlers = [logging.StreamHandler(sys.stderr)]
+    # Also log to file if the logs directory exists
+    if LOG_FILE.parent.exists():
+        handlers.append(logging.FileHandler(str(LOG_FILE), encoding="utf-8"))
     logging.basicConfig(
         level=level,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        handlers=[logging.StreamHandler(sys.stderr)],
+        handlers=handlers,
     )
 
 
@@ -565,6 +572,44 @@ def import_cmd(file: str) -> None:
     except ValueError as exc:
         click.echo(str(exc), err=True)
         raise SystemExit(1)
+
+
+# ======================================================================
+# protect / unprotect / protected
+# ======================================================================
+
+@cli.command("protect")
+@click.option("--type", "rtype", required=True, type=click.Choice(["A", "AAAA", "CNAME", "MX", "TXT", "SRV"]), help="Record type.")
+@click.option("--name", "rname", required=True, help="Record name.")
+@click.option("--reason", default="", help="Reason for protection.")
+def protect_cmd(rtype: str, rname: str, reason: str) -> None:
+    """Mark a record as protected (requires --force to modify)."""
+    add_protected_record(rtype, rname, reason)
+    click.echo(f"Protected: {rtype} {rname}")
+
+
+@cli.command("unprotect")
+@click.option("--type", "rtype", required=True, type=click.Choice(["A", "AAAA", "CNAME", "MX", "TXT", "SRV"]), help="Record type.")
+@click.option("--name", "rname", required=True, help="Record name.")
+def unprotect_cmd(rtype: str, rname: str) -> None:
+    """Remove protection from a record."""
+    remove_protected_record(rtype, rname)
+    click.echo(f"Unprotected: {rtype} {rname}")
+
+
+@cli.command("protected")
+def protected_cmd() -> None:
+    """List all protected records."""
+    protected = load_protected_records()
+    if not protected:
+        click.echo("No user-defined protected records.")
+        click.echo("(NS records are always system-protected.)")
+        return
+    click.echo(f"Protected records ({len(protected)}):")
+    for p in protected:
+        reason = f"  — {p['reason']}" if p.get('reason') else ""
+        click.echo(f"  {p['type']:6s} {p['name']}{reason}")
+    click.echo("\n(NS records are always system-protected.)")
 
 
 # ======================================================================

@@ -136,6 +136,40 @@
        </property>
       </widget>
      </item>
+     <!-- Protected -->
+     <item row="6" column="0">
+      <widget class="QLabel" name="protectedLabel">
+       <property name="text">
+        <string>Protected:</string>
+       </property>
+      </widget>
+     </item>
+     <item row="6" column="1">
+      <layout class="QHBoxLayout" name="protectedLayout">
+       <item>
+        <widget class="QCheckBox" name="protectedCheck">
+         <property name="text">
+          <string>Protect this record from plan/apply changes</string>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </item>
+     <!-- Protection reason -->
+     <item row="7" column="0">
+      <widget class="QLabel" name="reasonLabel">
+       <property name="text">
+        <string>Reason:</string>
+       </property>
+      </widget>
+     </item>
+     <item row="7" column="1">
+      <widget class="QLineEdit" name="reasonEdit">
+       <property name="placeholderText">
+        <string>Optional: why is this record protected?</string>
+       </property>
+      </widget>
+     </item>
     </layout>
    </item>
    <!-- Error label -->

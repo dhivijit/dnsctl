@@ -18,6 +18,8 @@ from core.state_manager import (
     save_zone,
     set_config,
     get_config,
+    add_protected_record,
+    remove_protected_record,
 )
 from gui.controllers.plan_controller import PlanController
 from gui.controllers.record_controller import RecordController
@@ -206,11 +208,11 @@ class MainController:
             return None
         return zone_name, state["zone_id"]
 
-    def _open_record_editor(self, existing: dict | None = None) -> dict | None:
-        """Open the record editor dialog and return the record dict, or None."""
+    def _open_record_editor(self, existing: dict | None = None) -> tuple[dict | None, tuple | None]:
+        """Open the record editor dialog. Returns (record, protect_changed) or (None, None)."""
         info = self._current_zone_info()
         if info is None:
-            return None
+            return None, None
         zone_name, _ = info
 
         from PyQt6 import uic
@@ -219,14 +221,15 @@ class MainController:
         ctrl = RecordEditorController(dialog, zone_name, existing)
         ctrl.setup()
         dialog.exec()
-        return ctrl.result
+        return ctrl.result, ctrl.protect_changed
 
     def _on_add_record(self) -> None:
-        record = self._open_record_editor()
+        record, protect_info = self._open_record_editor()
         if record is None:
             return
         self._record_ctrl.add_record(record)
         self._save_current_records()
+        self._apply_protect_change(record, protect_info)
         self._window.statusbar.showMessage(
             f"Added {record['type']} {record['name']}")
 
@@ -234,11 +237,12 @@ class MainController:
         old = self._record_ctrl.get_selected_record()
         if old is None:
             return
-        updated = self._open_record_editor(existing=old)
+        updated, protect_info = self._open_record_editor(existing=old)
         if updated is None:
             return
         self._record_ctrl.update_record(old, updated)
         self._save_current_records()
+        self._apply_protect_change(updated, protect_info)
         self._window.statusbar.showMessage(
             f"Updated {updated['type']} {updated['name']}")
 
@@ -274,6 +278,27 @@ class MainController:
         self._window.driftBadge.setText("● Local changes")
         self._window.driftBadge.setStyleSheet(
             "color: blue; font-weight: bold;")
+
+    def _apply_protect_change(self, record: dict, protect_info: tuple | None) -> None:
+        """Apply protection state change if the user toggled it in the editor."""
+        if protect_info is None:
+            return
+        was_protected, is_protected, reason = protect_info
+        rtype = record.get("type", "")
+        rname = record.get("name", "")
+        if is_protected and not was_protected:
+            add_protected_record(rtype, rname, reason)
+            logger.info("Protected %s %s", rtype, rname)
+        elif not is_protected and was_protected:
+            remove_protected_record(rtype, rname)
+            logger.info("Unprotected %s %s", rtype, rname)
+        elif is_protected and was_protected:
+            # Update reason — remove then re-add
+            remove_protected_record(rtype, rname)
+            add_protected_record(rtype, rname, reason)
+        # Refresh the Protected column in the table
+        if self._record_ctrl:
+            self._record_ctrl.refresh_protected()
 
     # ------------------------------------------------------------------
     # Plan / Apply
