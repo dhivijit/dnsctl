@@ -1,5 +1,8 @@
 __pycache__
 .pytest_cache
 .qtcreator
-*egg-info
+*.egg-info/
 build/
+dist/
+*.whl
+*.tar.gz

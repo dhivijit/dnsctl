@@ -58,25 +58,37 @@ CLI and GUI share the same core engine — no business logic in the UI layer.
 **Requirements:** Python 3.11+
 
 ```bash
-# Install in development mode
-pip install -e .
-
-# Or install dependencies directly
-pip install -r requirements.txt
+pip install dnsctl
 ```
 
-Run the CLI with `python -m cli.main` or the GUI with `python -m gui.app`.
+This installs two commands: `dnscli` (CLI) and `dnscli-g` (GUI).
+
+### Install from source
+
+```bash
+git clone https://github.com/dhivijit/dnsctl
+cd dnsctl
+pip install .
+```
+
+### Development install
+
+```bash
+git clone https://github.com/dhivijit/dnsctl
+cd dnsctl
+pip install -e ".[dev]"
+```
 
 ### Dependencies
 
-| Package        | Purpose                        |
-|----------------|--------------------------------|
-| `requests`     | Cloudflare API client          |
-| `click`        | CLI framework                  |
-| `PyQt6`        | GUI framework                  |
-| `cryptography` | AES-256-GCM token encryption   |
+| Package        | Purpose                           |
+|----------------|-----------------------------------|
+| `requests`     | Cloudflare API client             |
+| `click`        | CLI framework                     |
+| `PyQt6`        | GUI framework                     |
+| `cryptography` | AES-256-GCM token encryption      |
 | `keyring`      | OS keyring for credential storage |
-| `GitPython`    | Auto-managed git repository    |
+| `GitPython`    | Auto-managed git repository       |
 
 ---
 
@@ -203,8 +215,6 @@ Launch the GUI:
 
 ```bash
 dnscli-g
-# or
-python -m gui.app
 ```
 
 ### Main Window

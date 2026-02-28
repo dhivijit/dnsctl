@@ -5,11 +5,11 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "dnsctl"
 version = "1.0.0"
+authors = [{ name = "Dhivijit Koppuravuri", email = "me@dhivijit.dev" }]
 description = "Secure, version-controlled Cloudflare DNS manager with CLI and GUI"
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"
-authors = [{ name = "dnsctl contributors" }]
 keywords = ["cloudflare", "dns", "devops", "git", "cli"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
@@ -42,8 +42,8 @@ dev = [
 ]
 
 [project.urls]
-"Source" = "https://github.com/your-org/dnsctl"
-"Issue Tracker" = "https://github.com/your-org/dnsctl/issues"
+"Source" = "https://github.com/dhivijit/dnsctl"
+"Issue Tracker" = "https://github.com/dhivijit/dnsctl/issues"
 
 [project.scripts]
 dnscli = "dnsctl.cli.main:cli"
