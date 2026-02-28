@@ -2,7 +2,7 @@
 
 import pytest
 
-from core.diff_engine import (
+from dnsctl.core.diff_engine import (
     DiffResult,
     compute_diff,
     is_protected,

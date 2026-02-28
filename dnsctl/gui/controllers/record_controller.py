@@ -3,8 +3,8 @@
 from PyQt6.QtCore import Qt, QAbstractTableModel, QModelIndex, QSortFilterProxyModel
 from PyQt6.QtWidgets import QMainWindow, QTableView, QHeaderView
 
-from config import SUPPORTED_RECORD_TYPES
-from core.state_manager import load_protected_records
+from dnsctl.config import SUPPORTED_RECORD_TYPES
+from dnsctl.core.state_manager import load_protected_records
 
 # Column definitions for the record table
 _COLUMNS = ("Type", "Name", "Content", "TTL", "Priority", "Proxied", "Protected")

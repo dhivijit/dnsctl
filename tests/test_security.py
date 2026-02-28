@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from core.security import (
+from dnsctl.core.security import (
     _decrypt_token,
     _encrypt_token,
     get_token,
@@ -38,7 +38,7 @@ class TestEncryptionRoundtrip:
 
 
 class TestLoginUnlock:
-    @patch("core.security.keyring")
+    @patch("dnsctl.core.security.keyring")
     def test_login_stores_blob(self, mock_kr):
         login("tok123", "password")
         mock_kr.set_password.assert_called_once()
@@ -47,26 +47,26 @@ class TestLoginUnlock:
         assert user == "dnsctl"
         assert len(blob) > 0
 
-    @patch("core.security.keyring")
+    @patch("dnsctl.core.security.keyring")
     def test_is_logged_in_true(self, mock_kr):
         mock_kr.get_password.return_value = "something"
         assert is_logged_in() is True
 
-    @patch("core.security.keyring")
+    @patch("dnsctl.core.security.keyring")
     def test_is_logged_in_false(self, mock_kr):
         mock_kr.get_password.return_value = None
         assert is_logged_in() is False
 
 
 class TestSession:
-    @patch("core.security.keyring")
-    @patch("core.security.SESSION_FILE")
+    @patch("dnsctl.core.security.keyring")
+    @patch("dnsctl.core.security.SESSION_FILE")
     def test_get_token_returns_none_when_no_session_file(self, mock_sf, mock_kr):
         mock_sf.exists.return_value = False
         assert get_token() is None
 
-    @patch("core.security.keyring")
-    @patch("core.security.SESSION_FILE")
+    @patch("dnsctl.core.security.keyring")
+    @patch("dnsctl.core.security.SESSION_FILE")
     def test_lock_clears_session(self, mock_sf, mock_kr):
         mock_sf.exists.return_value = True
         lock()

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from git import Actor, InvalidGitRepositoryError, Repo
 
-from config import GIT_AUTHOR_EMAIL, GIT_AUTHOR_NAME, STATE_DIR
+from dnsctl.config import GIT_AUTHOR_EMAIL, GIT_AUTHOR_NAME, STATE_DIR
 
 logger = logging.getLogger(__name__)
 

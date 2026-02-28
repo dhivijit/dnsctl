@@ -10,7 +10,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 
-from config import (
+from dnsctl.config import (
     KEYRING_SERVICE_ENCRYPTED,
     KEYRING_SERVICE_SESSION,
     KEYRING_USERNAME,

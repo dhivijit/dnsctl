@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from core.sync_engine import SyncEngine, Plan, PlanAction, ApplyResult
+from dnsctl.core.sync_engine import SyncEngine, Plan, PlanAction, ApplyResult
 
 
 def _sample_records():
@@ -19,8 +19,8 @@ def _sample_records():
 # ------------------------------------------------------------------
 
 class TestDetectDrift:
-    @patch("core.sync_engine.CloudflareClient")
-    @patch("core.sync_engine.load_zone")
+    @patch("dnsctl.core.sync_engine.CloudflareClient")
+    @patch("dnsctl.core.sync_engine.load_zone")
     def test_clean_no_drift(self, mock_load, mock_cf_cls):
         records = _sample_records()
         mock_load.return_value = {"zone_id": "z1", "records": records}
@@ -33,8 +33,8 @@ class TestDetectDrift:
         assert drift is not None
         assert not drift.has_changes
 
-    @patch("core.sync_engine.CloudflareClient")
-    @patch("core.sync_engine.load_zone")
+    @patch("dnsctl.core.sync_engine.CloudflareClient")
+    @patch("dnsctl.core.sync_engine.load_zone")
     def test_drift_with_remote_addition(self, mock_load, mock_cf_cls):
         records = _sample_records()
         mock_load.return_value = {"zone_id": "z1", "records": records}
@@ -52,8 +52,8 @@ class TestDetectDrift:
         assert drift.has_changes
         assert len(drift.added) == 1
 
-    @patch("core.sync_engine.CloudflareClient")
-    @patch("core.sync_engine.load_zone")
+    @patch("dnsctl.core.sync_engine.CloudflareClient")
+    @patch("dnsctl.core.sync_engine.load_zone")
     def test_not_synced_returns_none(self, mock_load, mock_cf_cls):
         mock_load.return_value = None
         engine = SyncEngine()
@@ -65,8 +65,8 @@ class TestDetectDrift:
 # ------------------------------------------------------------------
 
 class TestGeneratePlan:
-    @patch("core.sync_engine.CloudflareClient")
-    @patch("core.sync_engine.load_zone")
+    @patch("dnsctl.core.sync_engine.CloudflareClient")
+    @patch("dnsctl.core.sync_engine.load_zone")
     def test_no_changes_when_in_sync(self, mock_load, mock_cf_cls):
         records = _sample_records()
         mock_load.return_value = {"zone_id": "z1", "records": records}
@@ -78,8 +78,8 @@ class TestGeneratePlan:
         plan = engine.generate_plan("x.com", "token")
         assert not plan.has_changes
 
-    @patch("core.sync_engine.CloudflareClient")
-    @patch("core.sync_engine.load_zone")
+    @patch("dnsctl.core.sync_engine.CloudflareClient")
+    @patch("dnsctl.core.sync_engine.load_zone")
     def test_plan_detects_delete_for_remote_addition(self, mock_load, mock_cf_cls):
         """Remote has extra record → plan includes DELETE to match local."""
         records = _sample_records()
@@ -99,8 +99,8 @@ class TestGeneratePlan:
         assert len(deletes) == 1
         assert deletes[0].record["name"] == "extra.x.com"
 
-    @patch("core.sync_engine.CloudflareClient")
-    @patch("core.sync_engine.load_zone")
+    @patch("dnsctl.core.sync_engine.CloudflareClient")
+    @patch("dnsctl.core.sync_engine.load_zone")
     def test_not_synced_raises(self, mock_load, mock_cf_cls):
         mock_load.return_value = None
         engine = SyncEngine()
@@ -113,9 +113,9 @@ class TestGeneratePlan:
 # ------------------------------------------------------------------
 
 class TestApplyPlan:
-    @patch("core.sync_engine.GitManager")
-    @patch("core.sync_engine.save_zone")
-    @patch("core.sync_engine.CloudflareClient")
+    @patch("dnsctl.core.sync_engine.GitManager")
+    @patch("dnsctl.core.sync_engine.save_zone")
+    @patch("dnsctl.core.sync_engine.CloudflareClient")
     def test_apply_create_calls_api(self, mock_cf_cls, mock_save, mock_git_cls):
         mock_cf = MagicMock()
         mock_cf_cls.return_value = mock_cf
@@ -138,9 +138,9 @@ class TestApplyPlan:
         assert len(result.succeeded) == 1
         mock_cf.create_record.assert_called_once()
 
-    @patch("core.sync_engine.GitManager")
-    @patch("core.sync_engine.save_zone")
-    @patch("core.sync_engine.CloudflareClient")
+    @patch("dnsctl.core.sync_engine.GitManager")
+    @patch("dnsctl.core.sync_engine.save_zone")
+    @patch("dnsctl.core.sync_engine.CloudflareClient")
     def test_apply_skips_protected(self, mock_cf_cls, mock_save, mock_git_cls):
         mock_cf = MagicMock()
         mock_cf_cls.return_value = mock_cf
@@ -166,9 +166,9 @@ class TestApplyPlan:
         assert len(result.failed) == 1
         mock_cf.delete_record.assert_not_called()
 
-    @patch("core.sync_engine.GitManager")
-    @patch("core.sync_engine.save_zone")
-    @patch("core.sync_engine.CloudflareClient")
+    @patch("dnsctl.core.sync_engine.GitManager")
+    @patch("dnsctl.core.sync_engine.save_zone")
+    @patch("dnsctl.core.sync_engine.CloudflareClient")
     def test_apply_force_overrides_protection(self, mock_cf_cls, mock_save, mock_git_cls):
         mock_cf = MagicMock()
         mock_cf_cls.return_value = mock_cf

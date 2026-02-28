@@ -6,11 +6,11 @@ import sys
 
 import click
 
-from config import LOG_FILE, STATE_DIR
-from core.cloudflare_client import CloudflareClient, sanitize_token
-from core.git_manager import GitManager
-from core.security import get_token, is_logged_in, lock, login, logout, unlock
-from core.state_manager import (
+from dnsctl.config import LOG_FILE, STATE_DIR
+from dnsctl.core.cloudflare_client import CloudflareClient, sanitize_token
+from dnsctl.core.git_manager import GitManager
+from dnsctl.core.security import get_token, is_logged_in, lock, login, logout, unlock
+from dnsctl.core.state_manager import (
     add_protected_record,
     export_zone,
     get_config,
@@ -23,8 +23,8 @@ from core.state_manager import (
     save_zone,
     set_config,
 )
-from core.sync_engine import SyncEngine
-from gui.controllers.record_editor_controller import validate_record
+from dnsctl.core.sync_engine import SyncEngine
+from dnsctl.gui.controllers.record_editor_controller import validate_record
 
 logger = logging.getLogger("dnsctl")
 _cf = CloudflareClient()

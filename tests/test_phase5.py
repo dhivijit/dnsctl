@@ -7,8 +7,8 @@ from unittest.mock import patch, MagicMock
 import pytest
 import requests
 
-from core import state_manager
-from core.cloudflare_client import CloudflareClient, CloudflareAPIError
+from dnsctl.core import state_manager
+from dnsctl.core.cloudflare_client import CloudflareClient, CloudflareAPIError
 
 
 # ------------------------------------------------------------------
@@ -32,7 +32,7 @@ def tmp_state(tmp_path):
         "CONFIG_FILE": config,
         "GITIGNORE_FILE": gitignore,
     }
-    with patch.multiple("core.state_manager", **patches):
+    with patch.multiple("dnsctl.core.state_manager", **patches):
         yield tmp_path
 
 
@@ -109,7 +109,7 @@ class TestConnectionErrorHandling:
         client = CloudflareClient()
         with patch.object(client._session, "request",
                           side_effect=requests.ConnectionError("network down")):
-            with patch("core.cloudflare_client.time.sleep"):
+            with patch("dnsctl.core.cloudflare_client.time.sleep"):
                 with pytest.raises(CloudflareAPIError, match="Connection failed"):
                     client._request("GET", "/test", "fake-token")
 
@@ -117,7 +117,7 @@ class TestConnectionErrorHandling:
         client = CloudflareClient()
         with patch.object(client._session, "request",
                           side_effect=requests.Timeout("timed out")):
-            with patch("core.cloudflare_client.time.sleep"):
+            with patch("dnsctl.core.cloudflare_client.time.sleep"):
                 with pytest.raises(CloudflareAPIError, match="timed out"):
                     client._request("GET", "/test", "fake-token")
 
@@ -131,6 +131,6 @@ class TestConnectionErrorHandling:
             client._session, "request",
             side_effect=[requests.ConnectionError("down"), ok_resp]
         ):
-            with patch("core.cloudflare_client.time.sleep"):
+            with patch("dnsctl.core.cloudflare_client.time.sleep"):
                 result = client._request("GET", "/test", "fake-token")
                 assert result["success"] is True

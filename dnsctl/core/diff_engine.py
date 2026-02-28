@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 
-from config import SYSTEM_PROTECTED_TYPES
+from dnsctl.config import SYSTEM_PROTECTED_TYPES
 
 
 @dataclass

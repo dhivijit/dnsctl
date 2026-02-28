@@ -6,12 +6,12 @@ from pathlib import Path
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QMainWindow, QMessageBox
 
-from config import SESSION_TIMEOUT_SECONDS
-from core.cloudflare_client import CloudflareClient, CloudflareAPIError
-from core.git_manager import GitManager
-from core.security import get_token, lock
-from core.sync_engine import SyncEngine
-from core.state_manager import (
+from dnsctl.config import SESSION_TIMEOUT_SECONDS
+from dnsctl.core.cloudflare_client import CloudflareClient, CloudflareAPIError
+from dnsctl.core.git_manager import GitManager
+from dnsctl.core.security import get_token, lock
+from dnsctl.core.sync_engine import SyncEngine
+from dnsctl.core.state_manager import (
     init_state_dir,
     list_synced_zones,
     load_zone,
@@ -21,10 +21,10 @@ from core.state_manager import (
     add_protected_record,
     remove_protected_record,
 )
-from gui.controllers.plan_controller import PlanController
-from gui.controllers.record_controller import RecordController
-from gui.controllers.record_editor_controller import RecordEditorController
-from gui.controllers.history_controller import HistoryController
+from dnsctl.gui.controllers.plan_controller import PlanController
+from dnsctl.gui.controllers.record_controller import RecordController
+from dnsctl.gui.controllers.record_editor_controller import RecordEditorController
+from dnsctl.gui.controllers.history_controller import HistoryController
 
 logger = logging.getLogger(__name__)
 
@@ -375,7 +375,7 @@ class MainController:
     def _on_export(self) -> None:
         """Export the current zone state to a JSON file."""
         from PyQt6.QtWidgets import QFileDialog
-        from core.state_manager import export_zone
+        from dnsctl.core.state_manager import export_zone
 
         zone_name = self._window.zoneComboBox.currentText()
         if not zone_name:
@@ -405,7 +405,7 @@ class MainController:
     def _on_import(self) -> None:
         """Import zone state from a JSON file."""
         from PyQt6.QtWidgets import QFileDialog
-        from core.state_manager import import_zone
+        from dnsctl.core.state_manager import import_zone
 
         path, _ = QFileDialog.getOpenFileName(
             self._window, "Import Zone State", "", "JSON Files (*.json)"

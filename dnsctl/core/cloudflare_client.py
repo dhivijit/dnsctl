@@ -7,7 +7,7 @@ from typing import Any
 
 import requests
 
-from config import CLOUDFLARE_API_BASE, SUPPORTED_RECORD_TYPES
+from dnsctl.config import CLOUDFLARE_API_BASE, SUPPORTED_RECORD_TYPES
 
 logger = logging.getLogger(__name__)
 

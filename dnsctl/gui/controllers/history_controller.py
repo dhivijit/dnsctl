@@ -12,8 +12,8 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem,
 )
 
-from core.git_manager import GitManager
-from core.state_manager import list_synced_zones
+from dnsctl.core.git_manager import GitManager
+from dnsctl.core.state_manager import list_synced_zones
 
 logger = logging.getLogger(__name__)
 

@@ -5,7 +5,7 @@ import logging
 
 from PyQt6.QtWidgets import QApplication, QDialog, QMessageBox
 
-from core.sync_engine import SyncEngine, Plan
+from dnsctl.core.sync_engine import SyncEngine, Plan
 
 logger = logging.getLogger(__name__)
 

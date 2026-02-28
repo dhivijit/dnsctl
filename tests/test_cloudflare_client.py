@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from core.cloudflare_client import CloudflareClient, CloudflareAPIError, _normalize_record
+from dnsctl.core.cloudflare_client import CloudflareClient, CloudflareAPIError, _normalize_record
 
 
 class TestNormalizeRecord:
@@ -48,7 +48,7 @@ class TestCloudflareClient:
         resp.headers = {}
         return resp
 
-    @patch("core.cloudflare_client.requests.Session")
+    @patch("dnsctl.core.cloudflare_client.requests.Session")
     def test_list_zones(self, mock_session_cls):
         mock_session = MagicMock()
         mock_session_cls.return_value = mock_session
@@ -67,7 +67,7 @@ class TestCloudflareClient:
         assert len(zones) == 2
         assert zones[0]["name"] == "example.com"
 
-    @patch("core.cloudflare_client.requests.Session")
+    @patch("dnsctl.core.cloudflare_client.requests.Session")
     def test_list_records_filters_unsupported(self, mock_session_cls):
         mock_session = MagicMock()
         mock_session_cls.return_value = mock_session
@@ -87,7 +87,7 @@ class TestCloudflareClient:
         assert len(records) == 1
         assert records[0]["type"] == "A"
 
-    @patch("core.cloudflare_client.requests.Session")
+    @patch("dnsctl.core.cloudflare_client.requests.Session")
     def test_api_error_raised(self, mock_session_cls):
         mock_session = MagicMock()
         mock_session_cls.return_value = mock_session

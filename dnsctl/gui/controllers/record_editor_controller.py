@@ -5,8 +5,8 @@ import re
 
 from PyQt6.QtWidgets import QDialog
 
-from config import SUPPORTED_RECORD_TYPES
-from core.state_manager import load_protected_records
+from dnsctl.config import SUPPORTED_RECORD_TYPES
+from dnsctl.core.state_manager import load_protected_records
 
 logger = logging.getLogger(__name__)
 

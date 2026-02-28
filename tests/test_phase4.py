@@ -6,8 +6,8 @@ from unittest.mock import patch
 
 import pytest
 
-from core import state_manager
-from core.git_manager import GitManager
+from dnsctl.core import state_manager
+from dnsctl.core.git_manager import GitManager
 
 
 # ------------------------------------------------------------------
@@ -31,7 +31,7 @@ def tmp_state(tmp_path):
         "CONFIG_FILE": config,
         "GITIGNORE_FILE": gitignore,
     }
-    with patch.multiple("core.state_manager", **patches):
+    with patch.multiple("dnsctl.core.state_manager", **patches):
         yield tmp_path
 
 

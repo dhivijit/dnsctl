@@ -4,9 +4,28 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dnsctl"
-version = "0.1.0"
-description = "Version-controlled Cloudflare DNS manager with CLI and GUI"
+version = "1.0.0"
+description = "Secure, version-controlled Cloudflare DNS manager with CLI and GUI"
+readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.11"
+authors = [{ name = "dnsctl contributors" }]
+keywords = ["cloudflare", "dns", "devops", "git", "cli"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Internet :: Name Service (DNS)",
+    "Topic :: System :: Systems Administration",
+    "Topic :: Utilities",
+]
 dependencies = [
     "requests>=2.31",
     "cryptography>=41.0",
@@ -22,14 +41,22 @@ dev = [
     "pyinstaller>=6.0",
 ]
 
+[project.urls]
+"Source" = "https://github.com/your-org/dnsctl"
+"Issue Tracker" = "https://github.com/your-org/dnsctl/issues"
+
 [project.scripts]
-dnscli = "cli.main:cli"
+dnscli = "dnsctl.cli.main:cli"
 
 [project.gui-scripts]
-dnscli-g = "gui.app:main"
+dnscli-g = "dnsctl.gui.app:main"
 
 [tool.setuptools.packages.find]
-include = ["cli*", "gui*", "core*", "config*"]
+where = ["."]
+include = ["dnsctl*"]
+
+[tool.setuptools.package-data]
+"dnsctl.gui" = ["ui/*.ui"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

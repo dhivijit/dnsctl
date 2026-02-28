@@ -8,10 +8,10 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
 from PyQt6 import uic
 
-from config import LOG_FILE
-from core.security import get_token, is_logged_in
-from core.state_manager import init_state_dir
-from gui.controllers.main_controller import MainController
+from dnsctl.config import LOG_FILE
+from dnsctl.core.security import get_token, is_logged_in
+from dnsctl.core.state_manager import init_state_dir
+from dnsctl.gui.controllers.main_controller import MainController
 
 UI_DIR = Path(__file__).parent / "ui"
 
@@ -24,8 +24,8 @@ def _load_ui(name: str):
 
 def _show_login_dialog(app: QApplication) -> bool:
     """Show the login dialog.  Returns True if login succeeded."""
-    from core.security import login
-    from core.cloudflare_client import CloudflareClient, sanitize_token
+    from dnsctl.core.security import login
+    from dnsctl.core.cloudflare_client import CloudflareClient, sanitize_token
 
     dialog = _load_ui("login_dialog.ui")
 
@@ -109,7 +109,7 @@ def _show_unlock_dialog(app: QApplication) -> str | None:
     the sentinel ``_FORGOT_PASSWORD`` is returned so the caller can show
     the login dialog again.
     """
-    from core.security import unlock, logout
+    from dnsctl.core.security import unlock, logout
     from PyQt6.QtWidgets import QMessageBox
 
     dialog = _load_ui("unlock_dialog.ui")

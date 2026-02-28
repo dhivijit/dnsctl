@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from config import (
+from dnsctl.config import (
     GITIGNORE_FILE,
     LOGS_DIR,
     METADATA_FILE,

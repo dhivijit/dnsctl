@@ -3,10 +3,10 @@
 import logging
 from dataclasses import dataclass, field
 
-from core.cloudflare_client import CloudflareClient, CloudflareAPIError
-from core.diff_engine import DiffResult, compute_diff, is_protected
-from core.git_manager import GitManager
-from core.state_manager import load_protected_records, load_zone, save_zone
+from dnsctl.core.cloudflare_client import CloudflareClient, CloudflareAPIError
+from dnsctl.core.diff_engine import DiffResult, compute_diff, is_protected
+from dnsctl.core.git_manager import GitManager
+from dnsctl.core.state_manager import load_protected_records, load_zone, save_zone
 
 logger = logging.getLogger(__name__)
 
