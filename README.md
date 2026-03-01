@@ -54,8 +54,8 @@ pip install -e .
 
 This provides:
 
-- `dnscli` — CLI interface  
-- `dnscli-g` — GUI launcher  
+- `dnsctl` — CLI interface  
+- `dnsctl-g` — GUI launcher  
 
 ---
 
@@ -64,13 +64,13 @@ This provides:
 ### 1. Initialize local state
 
 ```bash
-dnscli init
+dnsctl init
 ```
 
 ### 2. Store your Cloudflare API token (encrypted)
 
 ```bash
-dnscli login
+dnsctl login
 ```
 
 The token is:
@@ -81,13 +81,13 @@ The token is:
 ### 3. Unlock session
 
 ```bash
-dnscli unlock
+dnsctl unlock
 ```
 
 ### 4. Sync zones
 
 ```bash
-dnscli sync
+dnsctl sync
 ```
 
 ---
@@ -97,51 +97,51 @@ dnscli sync
 ### Authentication
 
 ```bash
-dnscli init
-dnscli login
-dnscli unlock
-dnscli lock
-dnscli logout
+dnsctl init
+dnsctl login
+dnsctl unlock
+dnsctl lock
+dnsctl logout
 ```
 
 ### Sync & Status
 
 ```bash
-dnscli sync [-z ZONE]
-dnscli status
-dnscli diff
-dnscli plan
-dnscli apply
+dnsctl sync [-z ZONE]
+dnsctl status
+dnsctl diff
+dnsctl plan
+dnsctl apply
 ```
 
 ### Record Management (Local State)
 
 ```bash
-dnscli add --type A --name sub.example.com --content 1.2.3.4
-dnscli edit --type A --name sub.example.com --content 5.6.7.8
-dnscli rm --type A --name sub.example.com
+dnsctl add --type A --name sub.example.com --content 1.2.3.4
+dnsctl edit --type A --name sub.example.com --content 5.6.7.8
+dnsctl rm --type A --name sub.example.com
 ```
 
 ### Protected Records
 
 ```bash
-dnscli protect --type A --name example.com --reason "Critical root record"
-dnscli unprotect --type A --name example.com
-dnscli protected
+dnsctl protect --type A --name example.com --reason "Critical root record"
+dnsctl unprotect --type A --name example.com
+dnsctl protected
 ```
 
 ### History & Rollback
 
 ```bash
-dnscli log
-dnscli rollback <commit_sha>
+dnsctl log
+dnsctl rollback <commit_sha>
 ```
 
 ### Import / Export
 
 ```bash
-dnscli export
-dnscli import zone.json
+dnsctl export
+dnsctl import zone.json
 ```
 
 ---
@@ -151,7 +151,7 @@ dnscli import zone.json
 Launch:
 
 ```bash
-dnscli-g
+dnsctl-g
 ```
 
 Features:

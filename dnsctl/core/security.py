@@ -94,7 +94,7 @@ def unlock(password: str) -> str:
     """
     blob = keyring.get_password(KEYRING_SERVICE_ENCRYPTED, KEYRING_USERNAME)
     if blob is None:
-        raise ValueError("Not logged in. Run 'dnscli login' first.")
+        raise ValueError("Not logged in. Run 'dnsctl login' first.")
 
     token = _decrypt_token(blob, password)
 

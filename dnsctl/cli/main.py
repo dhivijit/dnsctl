@@ -1,4 +1,4 @@
-"""dnscli — Click-based CLI entry point."""
+"""dnsctl — Click-based CLI entry point."""
 
 import getpass
 import logging
@@ -49,7 +49,7 @@ def _require_token() -> str:
     """Return the active token or abort with a helpful message."""
     token = get_token()
     if token is None:
-        click.echo("Session locked or expired.  Run 'dnscli unlock' first.", err=True)
+        click.echo("Session locked or expired.  Run 'dnsctl unlock' first.", err=True)
         raise SystemExit(1)
     return token
 
@@ -112,7 +112,7 @@ def login_cmd() -> None:
         click.echo("Password must be at least 8 characters.", err=True)
         raise SystemExit(1)
     login(token, password)
-    click.echo("Token encrypted and stored.  Run 'dnscli unlock' to start a session.")
+    click.echo("Token encrypted and stored.  Run 'dnsctl unlock' to start a session.")
 
 
 
@@ -126,7 +126,7 @@ def login_cmd() -> None:
 def unlock_cmd() -> None:
     """Unlock the session by entering the master password."""
     if not is_logged_in():
-        click.echo("No stored token.  Run 'dnscli login' first.", err=True)
+        click.echo("No stored token.  Run 'dnsctl login' first.", err=True)
         raise SystemExit(1)
     password = getpass.getpass("Master password: ")
     try:
@@ -194,7 +194,7 @@ def _resolve_zones(zone: str | None) -> list[str]:
         return [default]
     synced = list_synced_zones()
     if not synced:
-        click.echo("No zones synced. Run 'dnscli sync' first.", err=True)
+        click.echo("No zones synced. Run 'dnsctl sync' first.", err=True)
         raise SystemExit(1)
     return synced
 
@@ -286,7 +286,7 @@ def plan_cmd(zone: str | None) -> None:
         if not plan.has_changes:
             msg = f"{z}: No changes to apply."
             if plan.drift and plan.drift.has_changes:
-                msg += f"  (Drift detected: {plan.drift.summary} — run 'dnscli sync' to accept)"
+                msg += f"  (Drift detected: {plan.drift.summary} — run 'dnsctl sync' to accept)"
             click.echo(msg)
         else:
             click.echo(f"{z}: {plan.summary}")
@@ -356,7 +356,7 @@ def add_cmd(zone: str | None, rtype: str, rname: str, content: str,
     zone_name = _resolve_single_zone(zone)
     state = load_zone(zone_name)
     if state is None:
-        click.echo(f"Zone '{zone_name}' not synced. Run 'dnscli sync' first.", err=True)
+        click.echo(f"Zone '{zone_name}' not synced. Run 'dnsctl sync' first.", err=True)
         raise SystemExit(1)
 
     # Auto-append zone name if bare subdomain
@@ -379,7 +379,7 @@ def add_cmd(zone: str | None, rtype: str, rname: str, content: str,
     _git.auto_init()
     _git.commit(f"Add {rtype} {rname}")
     click.echo(f"Added {rtype} {rname} → {content}")
-    click.echo("Run 'dnscli plan' to review, then 'dnscli apply' to push to Cloudflare.")
+    click.echo("Run 'dnsctl plan' to review, then 'dnsctl apply' to push to Cloudflare.")
 
 
 # ======================================================================
@@ -432,7 +432,7 @@ def edit_cmd(zone: str | None, rname: str, rtype: str, content: str | None,
     _git.auto_init()
     _git.commit(f"Edit {rtype} {rname}")
     click.echo(f"Updated {rtype} {rname}")
-    click.echo("Run 'dnscli plan' to review, then 'dnscli apply' to push to Cloudflare.")
+    click.echo("Run 'dnsctl plan' to review, then 'dnsctl apply' to push to Cloudflare.")
 
 
 # ======================================================================
@@ -466,7 +466,7 @@ def rm_cmd(zone: str | None, rname: str, rtype: str) -> None:
     _git.commit(f"Delete {rtype} {rname}")
     removed = before - after
     click.echo(f"Removed {removed} record(s): {rtype} {rname}")
-    click.echo("Run 'dnscli plan' to review, then 'dnscli apply' to push to Cloudflare.")
+    click.echo("Run 'dnsctl plan' to review, then 'dnsctl apply' to push to Cloudflare.")
 
 
 # ======================================================================
@@ -489,14 +489,14 @@ def rollback_cmd(commit: str) -> None:
     known_shas = {c["sha"] for c in history} | {c["short_sha"] for c in history}
     if commit not in known_shas:
         click.echo(f"Commit '{commit}' not found in dnsctl history.", err=True)
-        click.echo("Use 'dnscli log' to see available commits.")
+        click.echo("Use 'dnsctl log' to see available commits.")
         raise SystemExit(1)
 
     try:
         new_sha = _git.rollback(commit)
         click.echo(f"Rolled back to {commit}")
         click.echo(f"New commit: {new_sha[:8]}")
-        click.echo("Run 'dnscli plan' to review, then 'dnscli apply' to push to Cloudflare.")
+        click.echo("Run 'dnsctl plan' to review, then 'dnsctl apply' to push to Cloudflare.")
     except ValueError as exc:
         click.echo(str(exc), err=True)
         raise SystemExit(1)
@@ -633,7 +633,7 @@ def status() -> None:
                 ts = state.get("last_synced_at", "?")
                 click.echo(f"  {name}  ({n} records, last sync: {ts})")
     else:
-        click.echo("No zones synced yet.  Run 'dnscli sync'.")
+        click.echo("No zones synced yet.  Run 'dnsctl sync'.")
 
     cfg = get_config()
     default = cfg.get("default_zone")

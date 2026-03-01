@@ -1,4 +1,4 @@
-"""dnscli-g — PyQt6 GUI entry point."""
+"""dnsctl-g — PyQt6 GUI entry point."""
 
 import logging
 import platform
@@ -15,8 +15,16 @@ from dnsctl.core.security import get_token, is_logged_in
 from dnsctl.core.state_manager import init_state_dir
 from dnsctl.gui.controllers.main_controller import MainController
 
-UI_DIR = Path(__file__).parent / "ui"
-ICON_PATH = Path(__file__).parent.parent / "icon.png"
+# Detect if running as PyInstaller bundle
+if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+    # Running as PyInstaller bundle - resources are in temporary directory
+    _BASE_PATH = Path(sys._MEIPASS)
+    UI_DIR = _BASE_PATH / "dnsctl" / "gui" / "ui"
+    ICON_PATH = _BASE_PATH / "dnsctl" / "icon.png"
+else:
+    # Running in normal Python environment
+    UI_DIR = Path(__file__).parent / "ui"
+    ICON_PATH = Path(__file__).parent.parent / "icon.png"
 
 
 def _set_platform_icon():
