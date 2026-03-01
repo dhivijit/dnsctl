@@ -3,10 +3,30 @@
 import html
 import logging
 
-from PyQt6.QtGui import QPalette
+from PyQt6.QtCore import QThread, pyqtSignal, Qt
+from PyQt6.QtGui import QPalette, QCursor
 from PyQt6.QtWidgets import QApplication, QDialog, QMessageBox
 
 from dnsctl.core.sync_engine import SyncEngine, Plan
+
+
+class _PlanWorker(QThread):
+    """Background thread that generates a Plan without blocking the UI."""
+
+    finished = pyqtSignal(object, str)  # plan_or_none, error_str
+
+    def __init__(self, engine: SyncEngine, zone_name: str, token: str) -> None:
+        super().__init__()
+        self._engine = engine
+        self._zone_name = zone_name
+        self._token = token
+
+    def run(self) -> None:
+        try:
+            plan = self._engine.generate_plan(self._zone_name, self._token)
+            self.finished.emit(plan, "")
+        except Exception as exc:
+            self.finished.emit(None, str(exc))
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +46,7 @@ class PlanController:
         self._engine = SyncEngine()
         self._plan: Plan | None = None
         self._applied = False
+        self._worker: _PlanWorker | None = None
 
     # ------------------------------------------------------------------
     # Public
@@ -37,30 +58,36 @@ class PlanController:
         d.applyButton.clicked.connect(self._on_apply)
         d.forceApplyButton.clicked.connect(lambda: self._on_apply(force=True))
         d.forceApplyButton.hide()
+        d.applyButton.setEnabled(False)
 
-        self._generate_plan()
+        self._start_plan_worker()
 
     @property
     def applied(self) -> bool:
         return self._applied
 
     # ------------------------------------------------------------------
-    # Plan generation
+    # Plan generation (async)
     # ------------------------------------------------------------------
 
-    def _generate_plan(self) -> None:
+    def _start_plan_worker(self) -> None:
         d = self._dialog
         d.zoneLabel.setText(f"Zone: {self._zone_name}")
         d.summaryLabel.setText("Fetching remote state…")
-        QApplication.processEvents()
 
-        try:
-            self._plan = self._engine.generate_plan(self._zone_name, self._token)
-        except Exception as exc:
-            d.summaryLabel.setText(f"Error: {exc}")
+        self._worker = _PlanWorker(self._engine, self._zone_name, self._token)
+        self._worker.finished.connect(self._on_plan_ready)
+        self._worker.start()
+        QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
+
+    def _on_plan_ready(self, plan, error: str) -> None:
+        QApplication.restoreOverrideCursor()
+        if error:
+            self._dialog.summaryLabel.setText(f"Error: {error}")
             return
 
-        plan = self._plan
+        self._plan = plan
+        d = self._dialog
 
         # Summary
         if not plan.has_changes:
@@ -231,15 +258,19 @@ class PlanController:
         d.applyButton.setEnabled(False)
         d.forceApplyButton.setEnabled(False)
         d.summaryLabel.setText("Applying…")
+        QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
         QApplication.processEvents()
 
         try:
             result = self._engine.apply_plan(self._plan, self._token, force=force)
         except Exception as exc:
+            QApplication.restoreOverrideCursor()
             QMessageBox.critical(d, "Apply Error", str(exc))
             d.applyButton.setEnabled(True)
             d.forceApplyButton.setEnabled(True)
             return
+
+        QApplication.restoreOverrideCursor()
 
         self._applied = True
 

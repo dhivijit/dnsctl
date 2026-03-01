@@ -24,7 +24,7 @@ from dnsctl.core.state_manager import (
     set_config,
 )
 from dnsctl.core.sync_engine import SyncEngine
-from dnsctl.gui.controllers.record_editor_controller import validate_record
+from dnsctl.core.validations import validate_record
 
 logger = logging.getLogger("dnsctl")
 _cf = CloudflareClient()

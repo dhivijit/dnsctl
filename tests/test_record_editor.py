@@ -2,7 +2,7 @@
 
 import pytest
 
-from dnsctl.gui.controllers.record_editor_controller import validate_record
+from dnsctl.core.validations import validate_record
 
 
 class TestValidateRecord:

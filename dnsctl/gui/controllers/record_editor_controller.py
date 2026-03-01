@@ -1,12 +1,11 @@
 """Record editor controller — drives the Add/Edit record dialog."""
 
 import logging
-import re
 
 from PyQt6.QtWidgets import QDialog
 
-from dnsctl.config import SUPPORTED_RECORD_TYPES
 from dnsctl.core.state_manager import load_protected_records
+from dnsctl.core.validations import validate_record
 
 logger = logging.getLogger(__name__)
 
@@ -15,34 +14,6 @@ _PROXY_TYPES = {"A", "AAAA", "CNAME"}
 # Types that use the Priority field
 _PRIORITY_TYPES = {"MX", "SRV"}
 
-_IPV4_RE = re.compile(
-    r"^(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}"
-    r"(?:25[0-5]|2[0-4]\d|[01]?\d\d?)$"
-)
-_IPV6_RE = re.compile(r"^[0-9a-fA-F:]+$")
-
-
-def validate_record(record: dict) -> str | None:
-    """Validate a record dict. Returns an error message, or None if valid."""
-    rtype = record.get("type", "")
-    name = record.get("name", "").strip()
-    content = record.get("content", "").strip()
-
-    if not rtype:
-        return "Record type is required."
-    if rtype not in SUPPORTED_RECORD_TYPES:
-        return f"Unsupported record type: {rtype}"
-    if not name:
-        return "Name is required."
-    if not content:
-        return "Content is required."
-
-    if rtype == "A" and not _IPV4_RE.match(content):
-        return "A record content must be a valid IPv4 address."
-    if rtype == "AAAA" and not _IPV6_RE.match(content):
-        return "AAAA record content must be a valid IPv6 address."
-
-    return None
 
 
 class RecordEditorController:

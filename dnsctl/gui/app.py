@@ -5,8 +5,8 @@ import platform
 import sys
 from pathlib import Path
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QIcon
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtGui import QIcon, QCursor
 from PyQt6.QtWidgets import QApplication
 from PyQt6 import uic
 
@@ -25,6 +25,25 @@ else:
     # Running in normal Python environment
     UI_DIR = Path(__file__).parent / "ui"
     ICON_PATH = Path(__file__).parent.parent / "icon.png"
+
+
+class _VerifyWorker(QThread):
+    """Background thread that verifies a Cloudflare API token."""
+
+    finished = pyqtSignal(bool, str)  # success, error_message
+
+    def __init__(self, token: str) -> None:
+        super().__init__()
+        self._token = token
+
+    def run(self) -> None:
+        try:
+            from dnsctl.core.cloudflare_client import CloudflareClient
+            cf = CloudflareClient()
+            cf.verify_token(self._token)
+            self.finished.emit(True, "")
+        except Exception as exc:
+            self.finished.emit(False, str(exc))
 
 
 def _set_platform_icon():
@@ -62,7 +81,7 @@ def _load_ui(name: str):
 def _show_login_dialog(app: QApplication) -> bool:
     """Show the login dialog.  Returns True if login succeeded."""
     from dnsctl.core.security import login
-    from dnsctl.core.cloudflare_client import CloudflareClient, sanitize_token
+    from dnsctl.core.cloudflare_client import sanitize_token
 
     dialog = _load_ui("login_dialog.ui")
 
@@ -108,28 +127,32 @@ def _show_login_dialog(app: QApplication) -> bool:
             dialog.errorLabel.setText("Passwords do not match.")
             return
 
-        # Verify the token against Cloudflare
+        # Verify the token against Cloudflare in a background thread
         dialog.errorLabel.setText("Verifying token with Cloudflare…")
         dialog.errorLabel.setStyleSheet("color: gray;")
         dialog.loginButton.setEnabled(False)
-        QApplication.processEvents()
 
-        try:
-            cf = CloudflareClient()
-            cf.verify_token(token)
-        except Exception as exc:
-            dialog.errorLabel.setStyleSheet("color: red;")
-            dialog.errorLabel.setText(f"Token verification failed: {exc}")
-            dialog.loginButton.setEnabled(True)
-            return
+        worker = _VerifyWorker(token)
+        dialog._verify_worker = worker  # keep alive during execution
 
-        try:
-            login(token, password)
-            dialog.accept()
-        except Exception as exc:
-            dialog.errorLabel.setStyleSheet("color: red;")
-            dialog.errorLabel.setText(f"Login failed: {exc}")
-            dialog.loginButton.setEnabled(True)
+        def on_verified(success: bool, error: str) -> None:
+            QApplication.restoreOverrideCursor()
+            if not success:
+                dialog.errorLabel.setStyleSheet("color: red;")
+                dialog.errorLabel.setText(f"Token verification failed: {error}")
+                dialog.loginButton.setEnabled(True)
+                return
+            try:
+                login(token, password)
+                dialog.accept()
+            except Exception as exc:
+                dialog.errorLabel.setStyleSheet("color: red;")
+                dialog.errorLabel.setText(f"Login failed: {exc}")
+                dialog.loginButton.setEnabled(True)
+
+        worker.finished.connect(on_verified)
+        QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
+        worker.start()
 
     dialog.loginButton.clicked.connect(on_login)
     dialog.cancelButton.clicked.connect(dialog.reject)

@@ -3,8 +3,9 @@
 import logging
 from pathlib import Path
 
-from PyQt6.QtCore import QTimer, QThread, pyqtSignal
-from PyQt6.QtWidgets import QMainWindow, QMessageBox
+from PyQt6.QtCore import QTimer, QThread, pyqtSignal, Qt
+from PyQt6.QtGui import QCursor
+from PyQt6.QtWidgets import QApplication, QMainWindow, QMessageBox, QProgressBar
 
 from dnsctl.config import SESSION_TIMEOUT_SECONDS
 from dnsctl.core.cloudflare_client import CloudflareClient, CloudflareAPIError
@@ -126,6 +127,15 @@ class MainController:
         # Start session timer
         self._session_timer.start()
 
+        # Indeterminate progress bar pinned to the right of the status bar
+        self._progress = QProgressBar()
+        self._progress.setMaximum(0)   # 0 = indeterminate pulsing animation
+        self._progress.setFixedWidth(150)
+        self._progress.setFixedHeight(16)
+        self._progress.setTextVisible(False)
+        self._progress.hide()
+        w.statusbar.addPermanentWidget(self._progress)
+
         # Auto-sync on startup (async) - show "Syncing..." status
         w.statusbar.showMessage("Syncing...")
         QTimer.singleShot(100, self._on_sync)  # Defer to allow window to show first
@@ -189,6 +199,8 @@ class MainController:
         w = self._window
         w.statusbar.showMessage("Syncing…")
         w.syncButton.setEnabled(False)
+        self._progress.show()
+        QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
 
         # Start background sync
         self._sync_worker = SyncWorker(token, self._cf, self._git)
@@ -199,6 +211,8 @@ class MainController:
         """Handle sync completion."""
         w = self._window
         w.syncButton.setEnabled(True)
+        self._progress.hide()
+        QApplication.restoreOverrideCursor()
 
         if success:
             self._populate_zone_combo()
