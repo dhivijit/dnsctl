@@ -1,6 +1,12 @@
+<div align="center">
+
+<img src="dnsctl/icon.png" alt="DNSCTL Icon" width="128" height="128">
+
 # DNSCTL
 
 **Secure, version-controlled DNS management for Cloudflare (CLI + GUI)**
+
+</div>
 
 DNSCTL is a local infrastructure tool for safely managing Cloudflare DNS records using a Git-backed state model, drift detection, and a plan/apply workflow.
 
@@ -32,30 +38,26 @@ Think of it as a lightweight, DNS-focused reconciliation engine for Cloudflare.
 
 ## 📦 Installation
 
-### Requirements
+### Windows
 
-- Python 3.11+
-- Git installed
-- OS keyring support (Windows Credential Manager / macOS Keychain / Linux Secret Service)
+**Download the installer from the [Releases](https://github.com/dhivijit/dnsctl/releases) page.**
 
-### Install from Source
+The installer includes both CLI and GUI applications with all dependencies bundled.
+
+### macOS / Linux
 
 ```bash
-git clone https://github.com/dhivijit/dnsctl
+git clone https://github.com/dhivijit/dnsctl.git
 cd dnsctl
 pip install .
 ```
 
-For development mode:
+**Requirements:**
+- Python 3.11+
+- Git
+- OS keyring support (macOS Keychain / Linux Secret Service)
 
-```bash
-pip install -e .
-```
-
-This provides:
-
-- `dnsctl` — CLI interface  
-- `dnsctl-g` — GUI launcher  
+**Note:** For development mode, use `pip install -e .`
 
 ---
 
