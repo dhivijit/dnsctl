@@ -3,7 +3,7 @@
 import logging
 from pathlib import Path
 
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QTimer, QThread, pyqtSignal
 from PyQt6.QtWidgets import QMainWindow, QMessageBox
 
 from dnsctl.config import SESSION_TIMEOUT_SECONDS
@@ -29,6 +29,46 @@ from dnsctl.gui.controllers.history_controller import HistoryController
 logger = logging.getLogger(__name__)
 
 
+class SyncWorker(QThread):
+    """Background worker for syncing zones from Cloudflare."""
+    
+    finished = pyqtSignal(bool, str, int)  # success, message, zone_count
+    
+    def __init__(self, token: str, cf: CloudflareClient, git: GitManager):
+        super().__init__()
+        self._token = token
+        self._cf = cf
+        self._git = git
+    
+    def run(self):
+        """Run the sync in a background thread."""
+        try:
+            zones = self._cf.list_zones(self._token)
+            if not zones:
+                self.finished.emit(False, "No zones found for this API token.", 0)
+                return
+
+            init_state_dir()
+            self._git.auto_init()
+
+            for z in zones:
+                records = self._cf.list_records(self._token, z["id"])
+                save_zone(z["id"], z["name"], records)
+
+            self._git.commit(f"Sync with remote ({len(zones)} zone(s))")
+
+            # Set default zone if not yet set
+            cfg = get_config()
+            if cfg.get("default_zone") is None:
+                set_config("default_zone", zones[0]["name"])
+
+            self.finished.emit(True, f"Synced {len(zones)} zone(s)", len(zones))
+        except CloudflareAPIError as exc:
+            self.finished.emit(False, f"Sync Error: {exc}", 0)
+        except Exception as exc:
+            self.finished.emit(False, f"Error: {exc}", 0)
+
+
 class MainController:
     """Wires the main window widgets to core engine operations."""
 
@@ -39,6 +79,7 @@ class MainController:
         self._git = GitManager()
         self._engine = SyncEngine()
         self._record_ctrl: RecordController | None = None
+        self._sync_worker: SyncWorker | None = None
 
         # Session expiry timer — check every 60 seconds
         self._session_timer = QTimer()
@@ -85,10 +126,9 @@ class MainController:
         # Start session timer
         self._session_timer.start()
 
-        # Auto-sync on startup
-        self._on_sync()
-
-        w.statusbar.showMessage("Ready")
+        # Auto-sync on startup (async) - show "Syncing..." status
+        w.statusbar.showMessage("Syncing...")
+        QTimer.singleShot(100, self._on_sync)  # Defer to allow window to show first
 
 
     # ------------------------------------------------------------------
@@ -137,53 +177,45 @@ class MainController:
     # ------------------------------------------------------------------
 
     def _on_sync(self) -> None:
+        """Start async sync operation."""
         token = self._ensure_token()
         if token is None:
+            return
+
+        # Don't start a new sync if one is already running
+        if self._sync_worker is not None and self._sync_worker.isRunning():
             return
 
         w = self._window
         w.statusbar.showMessage("Syncing…")
         w.syncButton.setEnabled(False)
 
-        try:
-            zones = self._cf.list_zones(token)
-            if not zones:
-                QMessageBox.warning(
-                    w, "Sync", "No zones found for this API token.")
-                return
+        # Start background sync
+        self._sync_worker = SyncWorker(token, self._cf, self._git)
+        self._sync_worker.finished.connect(self._on_sync_finished)
+        self._sync_worker.start()
 
-            init_state_dir()
-            self._git.auto_init()
+    def _on_sync_finished(self, success: bool, message: str, zone_count: int) -> None:
+        """Handle sync completion."""
+        w = self._window
+        w.syncButton.setEnabled(True)
 
-            for z in zones:
-                records = self._cf.list_records(token, z["id"])
-                save_zone(z["id"], z["name"], records)
-
-            self._git.commit(f"Sync with remote ({len(zones)} zone(s))")
-
-            # Set default zone if not yet set
-            cfg = get_config()
-            if cfg.get("default_zone") is None:
-                set_config("default_zone", zones[0]["name"])
-
+        if success:
             self._populate_zone_combo()
             self._load_current_zone()
-            w.statusbar.showMessage(f"Synced {len(zones)} zone(s)")
+            w.statusbar.showMessage(f"Ready — {message}")
 
             # Update drift badge (should be clean right after sync)
             zone_name = w.zoneComboBox.currentText()
             if zone_name:
                 w.driftBadge.setText("● Clean")
                 w.driftBadge.setStyleSheet("color: green; font-weight: bold;")
-
-        except CloudflareAPIError as exc:
-            QMessageBox.critical(w, "Sync Error", str(exc))
-            w.statusbar.showMessage("Sync failed")
-        except Exception as exc:
-            QMessageBox.critical(w, "Error", str(exc))
-            w.statusbar.showMessage("Sync failed")
-        finally:
-            w.syncButton.setEnabled(True)
+        else:
+            if "No zones found" in message:
+                QMessageBox.warning(w, "Sync", message)
+            else:
+                QMessageBox.critical(w, "Sync Failed", message)
+            w.statusbar.showMessage("Ready — Sync failed")
 
     # ------------------------------------------------------------------
     # Record CRUD

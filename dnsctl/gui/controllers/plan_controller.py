@@ -3,6 +3,7 @@
 import html
 import logging
 
+from PyQt6.QtGui import QPalette
 from PyQt6.QtWidgets import QApplication, QDialog, QMessageBox
 
 from dnsctl.core.sync_engine import SyncEngine, Plan
@@ -87,6 +88,13 @@ class PlanController:
     # HTML formatting
     # ------------------------------------------------------------------
 
+    def _is_dark_mode(self) -> bool:
+        """Detect if the application is in dark mode."""
+        palette = QApplication.palette()
+        bg_color = palette.color(QPalette.ColorRole.Window)
+        # If background is dark (luminance < 128), we're in dark mode
+        return bg_color.lightness() < 128
+
     @staticmethod
     def _esc(text: str) -> str:
         return html.escape(str(text))
@@ -94,6 +102,31 @@ class PlanController:
     def _format_plan_html(self, plan: Plan) -> str:
         lines: list[str] = []
         esc = self._esc
+        is_dark = self._is_dark_mode()
+
+        # Theme-aware colors
+        if is_dark:
+            # Dark mode colors - lighter, more vibrant colors
+            drift_added_color = "#64B5F6"      # Light blue
+            drift_modified_color = "#FFB74D"   # Light orange
+            drift_removed_color = "#E57373"    # Light red
+            action_create_color = "#81C784"    # Light green
+            action_update_color = "#FFB74D"    # Light orange
+            action_delete_color = "#E57373"    # Light red
+            table_header_bg = "#2d2d2d"        # Dark gray
+            table_row_bg = "transparent"
+            protected_color = "#FFB74D"        # Light orange
+        else:
+            # Light mode colors - original colors
+            drift_added_color = "#2196F3"      # Blue
+            drift_modified_color = "#FF9800"   # Orange
+            drift_removed_color = "#F44336"    # Red
+            action_create_color = "#4CAF50"    # Green
+            action_update_color = "#FF9800"    # Orange
+            action_delete_color = "#F44336"    # Red
+            table_header_bg = "#f0f0f0"        # Light gray
+            table_row_bg = "transparent"
+            protected_color = "orange"
 
         # Drift section
         if plan.drift and plan.drift.has_changes:
@@ -101,7 +134,7 @@ class PlanController:
             lines.append("<h3>Drift Detected (remote changes since last sync)</h3>")
 
             if drift.added:
-                lines.append("<p style='color:#2196F3'><b>Added remotely:</b></p><ul>")
+                lines.append(f"<p style='color:{drift_added_color}'><b>Added remotely:</b></p><ul>")
                 for r in drift.added:
                     lines.append(
                         f"<li>+ {esc(r.get('type',''))} {esc(r.get('name',''))} "
@@ -110,7 +143,7 @@ class PlanController:
                 lines.append("</ul>")
 
             if drift.modified:
-                lines.append("<p style='color:#FF9800'><b>Modified remotely:</b></p><ul>")
+                lines.append(f"<p style='color:{drift_modified_color}'><b>Modified remotely:</b></p><ul>")
                 for m in drift.modified:
                     b, a = m["before"], m["after"]
                     lines.append(
@@ -120,7 +153,7 @@ class PlanController:
                 lines.append("</ul>")
 
             if drift.removed:
-                lines.append("<p style='color:#F44336'><b>Removed remotely:</b></p><ul>")
+                lines.append(f"<p style='color:{drift_removed_color}'><b>Removed remotely:</b></p><ul>")
                 for r in drift.removed:
                     lines.append(
                         f"<li>- {esc(r.get('type',''))} {esc(r.get('name',''))} "
@@ -133,7 +166,7 @@ class PlanController:
             lines.append("<h3>Planned Actions</h3>")
             lines.append(
                 "<table style='border-collapse:collapse;width:100%'>"
-                "<tr style='background:#f0f0f0'>"
+                f"<tr style='background:{table_header_bg}'>"
                 "<th style='padding:4px 8px;text-align:left'>Action</th>"
                 "<th style='padding:4px 8px;text-align:left'>Type</th>"
                 "<th style='padding:4px 8px;text-align:left'>Name</th>"
@@ -142,11 +175,15 @@ class PlanController:
                 "</tr>"
             )
 
-            _colors = {"create": "#4CAF50", "update": "#FF9800", "delete": "#F44336"}
+            _colors = {
+                "create": action_create_color,
+                "update": action_update_color,
+                "delete": action_delete_color
+            }
             _symbols = {"create": "+", "update": "~", "delete": "-"}
 
             for a in plan.actions:
-                color = _colors.get(a.action, "#000")
+                color = _colors.get(a.action, "#000" if not is_dark else "#fff")
                 symbol = _symbols.get(a.action, "?")
                 prot = "\u26a0 Yes" if a.protected else ""
                 content = esc(a.record.get("content", ""))
@@ -156,13 +193,13 @@ class PlanController:
                         f"{esc(a.record.get('content', ''))}"
                     )
                 lines.append(
-                    f"<tr>"
+                    f"<tr style='background:{table_row_bg}'>"
                     f"<td style='padding:4px 8px;color:{color}'>"
                     f"<b>{symbol} {esc(a.action.upper())}</b></td>"
                     f"<td style='padding:4px 8px'>{esc(a.record.get('type',''))}</td>"
                     f"<td style='padding:4px 8px'>{esc(a.record.get('name',''))}</td>"
                     f"<td style='padding:4px 8px'>{content}</td>"
-                    f"<td style='padding:4px 8px;color:orange'>{prot}</td>"
+                    f"<td style='padding:4px 8px;color:{protected_color}'>{prot}</td>"
                     f"</tr>"
                 )
 

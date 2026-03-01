@@ -1,10 +1,12 @@
 """dnscli-g — PyQt6 GUI entry point."""
 
 import logging
+import platform
 import sys
 from pathlib import Path
 
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication
 from PyQt6 import uic
 
@@ -14,12 +16,39 @@ from dnsctl.core.state_manager import init_state_dir
 from dnsctl.gui.controllers.main_controller import MainController
 
 UI_DIR = Path(__file__).parent / "ui"
+ICON_PATH = Path(__file__).parent.parent / "icon.png"
+
+
+def _set_platform_icon():
+    """Set platform-specific icon configurations.
+    
+    - Windows: Sets AppUserModelID to prevent grouping with python.exe
+    - Linux: Icon handled by app.setWindowIcon() and .desktop file (if installed)
+    - macOS: Icon handled by app.setWindowIcon() (for .app bundles, use .icns)
+    """
+    if platform.system() == 'Windows':
+        try:
+            # On Windows, we need to set the AppUserModelID to prevent
+            # the app from being grouped with python.exe in the taskbar
+            import ctypes
+            myappid = 'dhivijit.dnsctl.gui.1.0.0'  # arbitrary string
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+        except Exception:
+            pass  # Failed to set, continue anyway
+    
+    # Linux and macOS work out of the box with app.setWindowIcon()
+    # For Linux system integration, create a .desktop file with Icon=dnsctl
+    # For macOS .app bundles, use an .icns file in the bundle
 
 
 def _load_ui(name: str):
     """Load a .ui file from the gui/ui/ directory and return the widget."""
     path = UI_DIR / name
-    return uic.loadUi(str(path))
+    widget = uic.loadUi(str(path))
+    # Set icon on all windows/dialogs
+    if ICON_PATH.exists():
+        widget.setWindowIcon(QIcon(str(ICON_PATH)))
+    return widget
 
 
 def _show_login_dialog(app: QApplication) -> bool:
@@ -163,8 +192,15 @@ def main() -> None:
         handlers=handlers,
     )
 
+    # Set platform-specific icon configuration (must be before QApplication)
+    _set_platform_icon()
+
     app = QApplication(sys.argv)
     app.setApplicationName("DNSCTL")
+    
+    # Set application-wide icon for all windows and taskbar
+    if ICON_PATH.exists():
+        app.setWindowIcon(QIcon(str(ICON_PATH)))
 
     # --- Authentication flow ---
     if not is_logged_in():
