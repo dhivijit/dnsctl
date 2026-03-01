@@ -8,7 +8,7 @@ version = "1.0.0"
 authors = [{ name = "Dhivijit Koppuravuri", email = "me@dhivijit.dev" }]
 description = "Secure, version-controlled DNS management tool with CLI and GUI"
 readme = "README.md"
-license = { file = "LICENSE" }
+license = "MIT"
 requires-python = ">=3.11"
 keywords = ["dns", "devops", "infrastructure", "git", "cli", "security"]
 classifiers = [
@@ -17,7 +17,6 @@ classifiers = [
     "Environment :: X11 Applications :: Qt",
     "Intended Audience :: Developers",
     "Intended Audience :: System Administrators",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
