@@ -3,14 +3,14 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "dnsctl"
+name = "dnsctl-app"
 version = "1.0.0"
 authors = [{ name = "Dhivijit Koppuravuri", email = "me@dhivijit.dev" }]
-description = "Secure, version-controlled Cloudflare DNS manager with CLI and GUI"
+description = "Secure, version-controlled DNS management tool with CLI and GUI"
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"
-keywords = ["cloudflare", "dns", "devops", "git", "cli"]
+keywords = ["dns", "devops", "infrastructure", "git", "cli", "security"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Environment :: Console",
