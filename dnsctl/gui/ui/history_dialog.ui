@@ -117,9 +117,6 @@
        <property name="enabled">
         <bool>false</bool>
        </property>
-       <property name="styleSheet">
-        <string>color: #c0392b; font-weight: bold;</string>
-       </property>
       </widget>
      </item>
     </layout>

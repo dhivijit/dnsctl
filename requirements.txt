@@ -4,3 +4,5 @@ keyring>=24.0
 click>=8.1
 PyQt6>=6.6
 GitPython>=3.1
+qt-material>=2.14
+qtawesome>=1.3

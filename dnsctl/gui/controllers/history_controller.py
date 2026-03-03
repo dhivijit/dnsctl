@@ -40,6 +40,24 @@ class HistoryController:
         d.exportButton.clicked.connect(self._on_export)
         d.historyTable.itemSelectionChanged.connect(self._on_selection)
 
+        # Icons and semantic styling for destructive action
+        from dnsctl.gui.icons import get_icon
+        from dnsctl.gui.theme import SEMANTIC_COLORS, load_theme_pref
+        _colors = SEMANTIC_COLORS[load_theme_pref()]
+        d.closeButton.setIcon(get_icon("close"))
+        d.exportButton.setIcon(get_icon("export"))
+        d.rollbackButton.setIcon(get_icon("rollback", color=_colors["danger"]))
+        d.rollbackButton.setStyleSheet(f"color: {_colors['danger']}; font-weight: bold;")
+
+        from dnsctl.gui.theme import ACCENT_COLOR
+        from dnsctl.gui.hover_anim import install_hover_animation
+        _accent = ACCENT_COLOR[load_theme_pref()]
+        install_hover_animation(d.closeButton, color=_accent)
+        install_hover_animation(d.exportButton, color=_accent)
+        install_hover_animation(
+            d.rollbackButton, color=_colors["danger"], blur_end=20
+        )
+
         # Load history
         self._git.auto_init()
         self._commits = self._git.log(max_count=100)

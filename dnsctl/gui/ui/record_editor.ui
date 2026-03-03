@@ -178,9 +178,6 @@
      <property name="text">
       <string/>
      </property>
-     <property name="styleSheet">
-      <string>color: red;</string>
-     </property>
      <property name="wordWrap">
       <bool>true</bool>
      </property>

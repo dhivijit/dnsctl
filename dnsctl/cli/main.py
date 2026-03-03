@@ -671,5 +671,14 @@ def logout_cmd() -> None:
 # Entry point
 # ======================================================================
 
+def main() -> None:
+    """Entry point wrapper — catches Ctrl+C for a clean exit."""
+    try:
+        cli(standalone_mode=True)
+    except KeyboardInterrupt:
+        click.echo("\nAborted.", err=True)
+        sys.exit(130)
+
+
 if __name__ == "__main__":
-    cli()
+    main()

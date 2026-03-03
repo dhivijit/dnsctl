@@ -60,6 +60,22 @@ class PlanController:
         d.forceApplyButton.hide()
         d.applyButton.setEnabled(False)
 
+        # Icons and semantic styling
+        from dnsctl.gui.icons import get_icon
+        from dnsctl.gui.theme import SEMANTIC_COLORS, load_theme_pref
+        _colors = SEMANTIC_COLORS[load_theme_pref()]
+        d.applyButton.setIcon(get_icon("apply"))
+        d.forceApplyButton.setIcon(get_icon("force_apply"))
+        d.forceApplyButton.setStyleSheet(f"color: {_colors['danger']};")
+        d.closeButton.setIcon(get_icon("close"))
+        d.warningLabel.setStyleSheet(f"color: {_colors['warning']}; font-weight: bold;")
+
+        from dnsctl.gui.theme import ACCENT_COLOR
+        from dnsctl.gui.hover_anim import install_hover_animation
+        _accent = ACCENT_COLOR[load_theme_pref()]
+        for btn in (d.applyButton, d.forceApplyButton, d.closeButton):
+            install_hover_animation(btn, color=_accent)
+
         self._start_plan_worker()
 
     @property
@@ -131,29 +147,18 @@ class PlanController:
         esc = self._esc
         is_dark = self._is_dark_mode()
 
-        # Theme-aware colors
-        if is_dark:
-            # Dark mode colors - lighter, more vibrant colors
-            drift_added_color = "#64B5F6"      # Light blue
-            drift_modified_color = "#FFB74D"   # Light orange
-            drift_removed_color = "#E57373"    # Light red
-            action_create_color = "#81C784"    # Light green
-            action_update_color = "#FFB74D"    # Light orange
-            action_delete_color = "#E57373"    # Light red
-            table_header_bg = "#2d2d2d"        # Dark gray
-            table_row_bg = "transparent"
-            protected_color = "#FFB74D"        # Light orange
-        else:
-            # Light mode colors - original colors
-            drift_added_color = "#2196F3"      # Blue
-            drift_modified_color = "#FF9800"   # Orange
-            drift_removed_color = "#F44336"    # Red
-            action_create_color = "#4CAF50"    # Green
-            action_update_color = "#FF9800"    # Orange
-            action_delete_color = "#F44336"    # Red
-            table_header_bg = "#f0f0f0"        # Light gray
-            table_row_bg = "transparent"
-            protected_color = "orange"
+        # Theme-aware colors from semantic palette
+        from dnsctl.gui.theme import SEMANTIC_COLORS
+        _colors = SEMANTIC_COLORS["dark" if is_dark else "light"]
+        drift_added_color    = _colors["info"]
+        drift_modified_color = _colors["warning"]
+        drift_removed_color  = _colors["error"]
+        action_create_color  = _colors["success"]
+        action_update_color  = _colors["warning"]
+        action_delete_color  = _colors["danger"]
+        protected_color      = _colors["warning"]
+        table_header_bg = "#2d2d2d" if is_dark else "#f0f0f0"
+        table_row_bg = "transparent"
 
         # Drift section
         if plan.drift and plan.drift.has_changes:
@@ -210,7 +215,7 @@ class PlanController:
             _symbols = {"create": "+", "update": "~", "delete": "-"}
 
             for a in plan.actions:
-                color = _colors.get(a.action, "#000" if not is_dark else "#fff")
+                color = _colors.get(a.action, _colors["muted"])
                 symbol = _symbols.get(a.action, "?")
                 prot = "\u26a0 Yes" if a.protected else ""
                 content = esc(a.record.get("content", ""))

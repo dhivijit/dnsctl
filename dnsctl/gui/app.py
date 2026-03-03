@@ -13,6 +13,7 @@ from PyQt6 import uic
 from dnsctl.config import LOG_FILE
 from dnsctl.core.security import get_token, is_logged_in
 from dnsctl.core.state_manager import init_state_dir
+from dnsctl.gui import theme as _gui_theme
 from dnsctl.gui.controllers.main_controller import MainController
 
 # Detect if running as PyInstaller bundle
@@ -84,7 +85,13 @@ def _show_login_dialog(app: QApplication) -> bool:
     from dnsctl.core.cloudflare_client import sanitize_token
 
     dialog = _load_ui("login_dialog.ui")
-
+    colors = _gui_theme.SEMANTIC_COLORS[_gui_theme.load_theme_pref()]
+    dialog.errorLabel.setStyleSheet(f"color: {colors['error']};")
+    # Hover glow on dialog buttons
+    from dnsctl.gui.hover_anim import install_hover_animation as _ha
+    _accent = _gui_theme.ACCENT_COLOR[_gui_theme.load_theme_pref()]
+    _ha(dialog.loginButton, color=_accent)
+    _ha(dialog.cancelButton, color=_accent)
     def on_help():
         from PyQt6.QtWidgets import QMessageBox
         msg = QMessageBox(dialog)
@@ -129,7 +136,7 @@ def _show_login_dialog(app: QApplication) -> bool:
 
         # Verify the token against Cloudflare in a background thread
         dialog.errorLabel.setText("Verifying token with Cloudflare…")
-        dialog.errorLabel.setStyleSheet("color: gray;")
+        dialog.errorLabel.setStyleSheet(f"color: {colors['muted']};")
         dialog.loginButton.setEnabled(False)
 
         worker = _VerifyWorker(token)
@@ -138,7 +145,7 @@ def _show_login_dialog(app: QApplication) -> bool:
         def on_verified(success: bool, error: str) -> None:
             QApplication.restoreOverrideCursor()
             if not success:
-                dialog.errorLabel.setStyleSheet("color: red;")
+                dialog.errorLabel.setStyleSheet(f"color: {colors['error']};")
                 dialog.errorLabel.setText(f"Token verification failed: {error}")
                 dialog.loginButton.setEnabled(True)
                 return
@@ -146,7 +153,7 @@ def _show_login_dialog(app: QApplication) -> bool:
                 login(token, password)
                 dialog.accept()
             except Exception as exc:
-                dialog.errorLabel.setStyleSheet("color: red;")
+                dialog.errorLabel.setStyleSheet(f"color: {colors['error']};")
                 dialog.errorLabel.setText(f"Login failed: {exc}")
                 dialog.loginButton.setEnabled(True)
 
@@ -173,6 +180,15 @@ def _show_unlock_dialog(app: QApplication) -> str | None:
     from PyQt6.QtWidgets import QMessageBox
 
     dialog = _load_ui("unlock_dialog.ui")
+    _uc = _gui_theme.SEMANTIC_COLORS[_gui_theme.load_theme_pref()]
+    dialog.errorLabel.setStyleSheet(f"color: {_uc['error']};")
+    dialog.forgotButton.setStyleSheet(f"color: {_uc['danger']};")
+    # Hover glow on dialog buttons
+    from dnsctl.gui.hover_anim import install_hover_animation as _ha2
+    _accent2 = _gui_theme.ACCENT_COLOR[_gui_theme.load_theme_pref()]
+    _ha2(dialog.unlockButton, color=_accent2)
+    _ha2(dialog.cancelButton, color=_accent2)
+    _ha2(dialog.forgotButton, color=_uc["danger"], blur_end=12)
     result = {"token": None}
 
     def on_unlock():
@@ -228,7 +244,11 @@ def main() -> None:
 
     app = QApplication(sys.argv)
     app.setApplicationName("DNSCTL")
-    
+
+    # Apply modern theme before any windows are shown
+    _current_theme = _gui_theme.load_theme_pref()
+    _gui_theme.apply_theme(app, _current_theme)
+
     # Set application-wide icon for all windows and taskbar
     if ICON_PATH.exists():
         app.setWindowIcon(QIcon(str(ICON_PATH)))
@@ -256,7 +276,7 @@ def main() -> None:
 
     # --- Main window ---
     window = _load_ui("main_window.ui")
-    controller = MainController(window, token)
+    controller = MainController(window, token, theme_mode=_current_theme)
     controller.setup()
     window.show()
 

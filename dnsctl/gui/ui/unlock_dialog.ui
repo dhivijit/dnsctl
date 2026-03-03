@@ -47,9 +47,6 @@
    </item>
    <item>
     <widget class="QLabel" name="errorLabel">
-     <property name="styleSheet">
-      <string>color: red;</string>
-     </property>
      <property name="text">
       <string/>
      </property>
@@ -61,9 +58,6 @@
       <widget class="QPushButton" name="forgotButton">
        <property name="text">
         <string>Forgot Password</string>
-       </property>
-       <property name="styleSheet">
-        <string>color: #cc4444;</string>
        </property>
        <property name="flat">
         <bool>true</bool>

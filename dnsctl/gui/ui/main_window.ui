@@ -49,9 +49,6 @@
       </item>
       <item>
        <widget class="QLabel" name="driftBadge">
-        <property name="styleSheet">
-         <string>color: green; font-weight: bold;</string>
-        </property>
         <property name="text">
          <string>● Clean</string>
         </property>
@@ -82,6 +79,19 @@
        <widget class="QPushButton" name="lockButton">
         <property name="text">
          <string>Lock</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="themeToggleButton">
+        <property name="text">
+         <string/>
+        </property>
+        <property name="toolTip">
+         <string>Toggle light/dark theme</string>
+        </property>
+        <property name="flat">
+         <bool>true</bool>
         </property>
        </widget>
       </item>
@@ -260,9 +270,6 @@
         </property>
         <property name="enabled">
          <bool>false</bool>
-        </property>
-        <property name="styleSheet">
-         <string>color: red;</string>
         </property>
        </widget>
       </item>

@@ -54,6 +54,20 @@ class RecordEditorController:
         d.saveButton.clicked.connect(self._on_save)
         d.cancelButton.clicked.connect(d.reject)
 
+        # Icons and error label styling
+        from dnsctl.gui.icons import get_icon
+        from dnsctl.gui.theme import SEMANTIC_COLORS, load_theme_pref
+        _colors = SEMANTIC_COLORS[load_theme_pref()]
+        d.saveButton.setIcon(get_icon("save"))
+        d.cancelButton.setIcon(get_icon("cancel"))
+        d.errorLabel.setStyleSheet(f"color: {_colors['error']};")
+
+        from dnsctl.gui.theme import ACCENT_COLOR
+        from dnsctl.gui.hover_anim import install_hover_animation
+        _accent = ACCENT_COLOR[load_theme_pref()]
+        install_hover_animation(d.saveButton, color=_accent)
+        install_hover_animation(d.cancelButton, color=_accent)
+
         # Wire protected checkbox to show/hide reason field
         d.protectedCheck.toggled.connect(self._on_protected_toggled)
 

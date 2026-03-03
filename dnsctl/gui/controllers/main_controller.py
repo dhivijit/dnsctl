@@ -26,6 +26,8 @@ from dnsctl.gui.controllers.plan_controller import PlanController
 from dnsctl.gui.controllers.record_controller import RecordController
 from dnsctl.gui.controllers.record_editor_controller import RecordEditorController
 from dnsctl.gui.controllers.history_controller import HistoryController
+from dnsctl.gui import theme as _theme
+from dnsctl.gui import icons as _icons
 
 logger = logging.getLogger(__name__)
 
@@ -73,9 +75,12 @@ class SyncWorker(QThread):
 class MainController:
     """Wires the main window widgets to core engine operations."""
 
-    def __init__(self, window: QMainWindow, token: str) -> None:
+    def __init__(self, window: QMainWindow, token: str, theme_mode: str = "dark") -> None:
         self._window = window
         self._token = token
+        self._theme_mode = theme_mode
+        self._drift_state: str = "unknown"
+        self._drift_text: str = "● …"
         self._cf = CloudflareClient()
         self._git = GitManager()
         self._engine = SyncEngine()
@@ -105,9 +110,13 @@ class MainController:
         w.deleteRecordButton.clicked.connect(self._on_delete_record)
         w.importButton.clicked.connect(self._on_import)
         w.exportButton.clicked.connect(self._on_export)
+        w.themeToggleButton.clicked.connect(self._on_toggle_theme)
 
         # Zone selector
         w.zoneComboBox.currentIndexChanged.connect(self._on_zone_changed)
+
+        # Apply icons to all buttons for the current theme
+        self._setup_button_icons()
 
         # Record controller (read-only table population)
         self._record_ctrl = RecordController(w)
@@ -138,6 +147,7 @@ class MainController:
 
         # Auto-sync on startup (async) - show "Syncing..." status
         w.statusbar.showMessage("Syncing...")
+        self._set_drift_badge("unknown", "● …")
         QTimer.singleShot(100, self._on_sync)  # Defer to allow window to show first
 
 
@@ -222,8 +232,7 @@ class MainController:
             # Update drift badge (should be clean right after sync)
             zone_name = w.zoneComboBox.currentText()
             if zone_name:
-                w.driftBadge.setText("● Clean")
-                w.driftBadge.setStyleSheet("color: green; font-weight: bold;")
+                self._set_drift_badge("clean", "● Clean")
         else:
             if "No zones found" in message:
                 QMessageBox.warning(w, "Sync", message)
@@ -321,9 +330,7 @@ class MainController:
         save_zone(zone_id, zone_name, records)
         self._git.auto_init()
         self._git.commit(f"Local record edit in {zone_name}")
-        self._window.driftBadge.setText("● Local changes")
-        self._window.driftBadge.setStyleSheet(
-            "color: blue; font-weight: bold;")
+        self._set_drift_badge("local", "● Local changes")
 
     def _apply_protect_change(self, record: dict, protect_info: tuple | None) -> None:
         """Apply protection state change if the user toggled it in the editor."""
@@ -378,16 +385,12 @@ class MainController:
         """Check drift and update the toolbar badge."""
         try:
             drift = self._engine.detect_drift(zone_name, token)
-            w = self._window
             if drift is None:
-                w.driftBadge.setText("● Unknown")
-                w.driftBadge.setStyleSheet("color: gray; font-weight: bold;")
+                self._set_drift_badge("unknown", "● Unknown")
             elif drift.has_changes:
-                w.driftBadge.setText(f"● Drift ({drift.summary})")
-                w.driftBadge.setStyleSheet("color: orange; font-weight: bold;")
+                self._set_drift_badge("drift", f"● Drift ({drift.summary})")
             else:
-                w.driftBadge.setText("● Clean")
-                w.driftBadge.setStyleSheet("color: green; font-weight: bold;")
+                self._set_drift_badge("clean", "● Clean")
         except Exception:
             pass  # don't break UI on drift-check failure
 
@@ -408,9 +411,7 @@ class MainController:
         if ctrl.rolled_back:
             self._populate_zone_combo()
             self._load_current_zone()
-            self._window.driftBadge.setText("● Local changes")
-            self._window.driftBadge.setStyleSheet(
-                "color: blue; font-weight: bold;")
+            self._set_drift_badge("local", "● Local changes")
             self._window.statusbar.showMessage(
                 "Rolled back — review with Plan")
 
@@ -468,13 +469,78 @@ class MainController:
             self._populate_zone_combo()
             self._window.zoneComboBox.setCurrentText(zone_name)
             self._load_current_zone()
-            self._window.driftBadge.setText("● Local changes")
-            self._window.driftBadge.setStyleSheet(
-                "color: blue; font-weight: bold;")
+            self._set_drift_badge("local", "● Local changes")
             self._window.statusbar.showMessage(
                 f"Imported {zone_name} ({n} records)")
         except ValueError as exc:
             QMessageBox.critical(self._window, "Import Error", str(exc))
+
+    # ------------------------------------------------------------------
+    # Theme
+    # ------------------------------------------------------------------
+
+    def _setup_button_icons(self) -> None:
+        """Set icons on all toolbar and CRUD buttons.
+
+        Called once during setup and again after each theme toggle so icons
+        re-render with the updated palette colors.
+        """
+        w = self._window
+        colors = _theme.SEMANTIC_COLORS[self._theme_mode]
+        accent = _theme.ACCENT_COLOR[self._theme_mode]
+        from dnsctl.gui.hover_anim import install_hover_animation
+        w.syncButton.setIcon(_icons.get_icon("sync"))
+        w.planButton.setIcon(_icons.get_icon("plan"))
+        w.historyButton.setIcon(_icons.get_icon("history"))
+        w.lockButton.setIcon(_icons.get_icon("lock"))
+        w.addRecordButton.setIcon(_icons.get_icon("add"))
+        w.editRecordButton.setIcon(_icons.get_icon("edit"))
+        w.deleteRecordButton.setIcon(_icons.get_icon("delete", color=colors["danger"]))
+        w.importButton.setIcon(_icons.get_icon("import_"))
+        w.exportButton.setIcon(_icons.get_icon("export"))
+        icon_name = "theme_light" if self._theme_mode == "dark" else "theme_dark"
+        w.themeToggleButton.setIcon(_icons.get_icon(icon_name))
+        w.themeToggleButton.setToolTip(
+            "Switch to light theme" if self._theme_mode == "dark"
+            else "Switch to dark theme"
+        )
+        # Hover glow on all buttons — updates color if already installed
+        for btn in (
+            w.syncButton, w.planButton, w.historyButton, w.lockButton,
+            w.themeToggleButton, w.addRecordButton, w.editRecordButton,
+            w.deleteRecordButton, w.importButton, w.exportButton,
+        ):
+            install_hover_animation(btn, color=accent)
+
+    def _set_drift_badge(self, state: str, text: str) -> None:
+        """Set drift badge text and colour using the current theme's semantic tokens.
+
+        Parameters
+        ----------
+        state:
+            One of ``"clean"``, ``"drift"``, ``"local"``, ``"unknown"``.
+        text:
+            The string displayed in the badge label.
+        """
+        self._drift_state = state
+        self._drift_text = text
+        colors = _theme.SEMANTIC_COLORS[self._theme_mode]
+        color_map = {
+            "clean":   colors["success"],
+            "drift":   colors["warning"],
+            "local":   colors["info"],
+            "unknown": colors["muted"],
+        }
+        color = color_map.get(state, colors["muted"])
+        self._window.driftBadge.setStyleSheet(f"color: {color}; font-weight: bold;")
+        self._window.driftBadge.setText(text)
+
+    def _on_toggle_theme(self) -> None:
+        """Toggle between dark and light mode, re-render icons and drift badge."""
+        app = QApplication.instance()
+        self._theme_mode = _theme.toggle_theme(app, self._theme_mode)
+        self._setup_button_icons()
+        self._set_drift_badge(self._drift_state, self._drift_text)
 
     # ------------------------------------------------------------------
     # Lock
