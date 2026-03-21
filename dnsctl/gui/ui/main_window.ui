@@ -18,6 +18,52 @@
     <item>
      <layout class="QHBoxLayout" name="toolbarLayout">
       <item>
+       <widget class="QLabel" name="accountLabel">
+        <property name="text">
+         <string>Account:</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QComboBox" name="accountComboBox">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+          <horstretch>1</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="toolTip">
+         <string>Switch between Cloudflare accounts</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QToolButton" name="addAccountButton">
+        <property name="text">
+         <string>+</string>
+        </property>
+        <property name="toolTip">
+         <string>Add a new Cloudflare account</string>
+        </property>
+        <property name="autoRaise">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QToolButton" name="removeAccountButton">
+        <property name="text">
+         <string>−</string>
+        </property>
+        <property name="toolTip">
+         <string>Remove current Cloudflare account</string>
+        </property>
+        <property name="autoRaise">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item>
        <widget class="QLabel" name="zoneLabel">
         <property name="text">
          <string>Zone:</string>

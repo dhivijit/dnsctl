@@ -17,22 +17,26 @@ from dnsctl.core.git_manager import GitManager
 @pytest.fixture
 def tmp_state(tmp_path):
     """Patch all state directory paths to a temp dir for isolation."""
-    zones = tmp_path / "zones"
+    accounts_dir = tmp_path / "accounts"
+    accounts_file = tmp_path / "accounts.json"
     logs = tmp_path / "logs"
     metadata = tmp_path / "metadata.json"
     config = tmp_path / "config.json"
-    gitignore = tmp_path / ".gitignore"
 
-    patches = {
-        "STATE_DIR": tmp_path,
-        "ZONES_DIR": zones,
-        "LOGS_DIR": logs,
-        "METADATA_FILE": metadata,
-        "CONFIG_FILE": config,
-        "GITIGNORE_FILE": gitignore,
-    }
-    with patch.multiple("dnsctl.core.state_manager", **patches):
+    with patch.multiple(
+        "dnsctl.core.state_manager",
+        STATE_DIR=tmp_path,
+        ACCOUNTS_DIR=accounts_dir,
+        ACCOUNTS_FILE=accounts_file,
+        LOGS_DIR=logs,
+        METADATA_FILE=metadata,
+        CONFIG_FILE=config,
+        _LEGACY_ZONES_DIR=tmp_path / "zones",
+    ):
         yield tmp_path
+
+
+_ALIAS = "test"
 
 
 @pytest.fixture
@@ -138,12 +142,13 @@ class TestShowFileAt:
 
 class TestExport:
     def test_export_zone(self, tmp_state):
-        state_manager.init_state_dir()
+        with patch("dnsctl.core.state_manager._migrate_legacy"):
+            state_manager.init_state_dir()
         records = [{"type": "A", "name": "x.com", "content": "1.2.3.4"}]
-        state_manager.save_zone("z1", "x.com", records)
+        state_manager.save_zone("z1", "x.com", records, _ALIAS)
 
         dest = tmp_state / "export.json"
-        state_manager.export_zone("x.com", dest)
+        state_manager.export_zone("x.com", dest, _ALIAS)
 
         assert dest.exists()
         data = json.loads(dest.read_text())
@@ -152,14 +157,16 @@ class TestExport:
         assert len(data["records"]) == 1
 
     def test_export_nonexistent_zone_raises(self, tmp_state):
-        state_manager.init_state_dir()
+        with patch("dnsctl.core.state_manager._migrate_legacy"):
+            state_manager.init_state_dir()
         with pytest.raises(FileNotFoundError, match="not been synced"):
-            state_manager.export_zone("missing.com", tmp_state / "out.json")
+            state_manager.export_zone("missing.com", tmp_state / "out.json", _ALIAS)
 
 
 class TestImport:
     def test_import_valid_file(self, tmp_state):
-        state_manager.init_state_dir()
+        with patch("dnsctl.core.state_manager._migrate_legacy"):
+            state_manager.init_state_dir()
         src = tmp_state / "import.json"
         src.write_text(json.dumps({
             "zone_id": "z99",
@@ -169,33 +176,36 @@ class TestImport:
             "state_hash": "abc123",
         }))
 
-        state = state_manager.import_zone(src)
+        state = state_manager.import_zone(src, _ALIAS)
         assert state["zone_name"] == "imported.com"
         assert len(state["records"]) == 1
 
         # Verify it was saved
-        loaded = state_manager.load_zone("imported.com")
+        loaded = state_manager.load_zone("imported.com", _ALIAS)
         assert loaded is not None
         assert loaded["zone_id"] == "z99"
 
     def test_import_missing_fields_raises(self, tmp_state):
-        state_manager.init_state_dir()
+        with patch("dnsctl.core.state_manager._migrate_legacy"):
+            state_manager.init_state_dir()
         src = tmp_state / "bad.json"
         src.write_text(json.dumps({"zone_id": "z1"}))
 
         with pytest.raises(ValueError, match="must contain"):
-            state_manager.import_zone(src)
+            state_manager.import_zone(src, _ALIAS)
 
     def test_import_invalid_json_raises(self, tmp_state):
-        state_manager.init_state_dir()
+        with patch("dnsctl.core.state_manager._migrate_legacy"):
+            state_manager.init_state_dir()
         src = tmp_state / "bad.json"
         src.write_text("not json {{{")
 
         with pytest.raises(ValueError, match="Cannot read"):
-            state_manager.import_zone(src)
+            state_manager.import_zone(src, _ALIAS)
 
     def test_import_records_not_list_raises(self, tmp_state):
-        state_manager.init_state_dir()
+        with patch("dnsctl.core.state_manager._migrate_legacy"):
+            state_manager.init_state_dir()
         src = tmp_state / "bad.json"
         src.write_text(json.dumps({
             "zone_id": "z1",
@@ -204,24 +214,26 @@ class TestImport:
         }))
 
         with pytest.raises(ValueError, match="must be a list"):
-            state_manager.import_zone(src)
+            state_manager.import_zone(src, _ALIAS)
 
     def test_roundtrip_export_import(self, tmp_state):
-        state_manager.init_state_dir()
+        with patch("dnsctl.core.state_manager._migrate_legacy"):
+            state_manager.init_state_dir()
         records = [
             {"type": "A", "name": "x.com", "content": "1.2.3.4", "ttl": 300},
             {"type": "CNAME", "name": "www.x.com", "content": "x.com", "ttl": 1},
         ]
-        state_manager.save_zone("z1", "x.com", records)
+        state_manager.save_zone("z1", "x.com", records, _ALIAS)
 
         export_path = tmp_state / "roundtrip.json"
-        state_manager.export_zone("x.com", export_path)
+        state_manager.export_zone("x.com", export_path, _ALIAS)
 
         # Clear the zone
-        (tmp_state / "zones" / "x.com.json").unlink()
-        assert state_manager.load_zone("x.com") is None
+        zone_file = tmp_state / "accounts" / _ALIAS / "zones" / "x.com.json"
+        zone_file.unlink()
+        assert state_manager.load_zone("x.com", _ALIAS) is None
 
         # Re-import
-        state = state_manager.import_zone(export_path)
+        state = state_manager.import_zone(export_path, _ALIAS)
         assert state["zone_name"] == "x.com"
         assert len(state["records"]) == 2

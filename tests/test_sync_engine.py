@@ -28,7 +28,7 @@ class TestDetectDrift:
         mock_cf_cls.return_value = mock_cf
         mock_cf.list_records.return_value = list(records)
 
-        engine = SyncEngine()
+        engine = SyncEngine(alias="test")
         drift = engine.detect_drift("x.com", "token")
         assert drift is not None
         assert not drift.has_changes
@@ -46,7 +46,7 @@ class TestDetectDrift:
         mock_cf_cls.return_value = mock_cf
         mock_cf.list_records.return_value = remote
 
-        engine = SyncEngine()
+        engine = SyncEngine(alias="test")
         drift = engine.detect_drift("x.com", "token")
         assert drift is not None
         assert drift.has_changes
@@ -56,7 +56,7 @@ class TestDetectDrift:
     @patch("dnsctl.core.sync_engine.load_zone")
     def test_not_synced_returns_none(self, mock_load, mock_cf_cls):
         mock_load.return_value = None
-        engine = SyncEngine()
+        engine = SyncEngine(alias="test")
         assert engine.detect_drift("x.com", "token") is None
 
 
@@ -74,7 +74,7 @@ class TestGeneratePlan:
         mock_cf_cls.return_value = mock_cf
         mock_cf.list_records.return_value = list(records)
 
-        engine = SyncEngine()
+        engine = SyncEngine(alias="test")
         plan = engine.generate_plan("x.com", "token")
         assert not plan.has_changes
 
@@ -92,7 +92,7 @@ class TestGeneratePlan:
         mock_cf_cls.return_value = mock_cf
         mock_cf.list_records.return_value = remote
 
-        engine = SyncEngine()
+        engine = SyncEngine(alias="test")
         plan = engine.generate_plan("x.com", "token")
         assert plan.has_changes
         deletes = [a for a in plan.actions if a.action == "delete"]
@@ -103,7 +103,7 @@ class TestGeneratePlan:
     @patch("dnsctl.core.sync_engine.load_zone")
     def test_not_synced_raises(self, mock_load, mock_cf_cls):
         mock_load.return_value = None
-        engine = SyncEngine()
+        engine = SyncEngine(alias="test")
         with pytest.raises(ValueError, match="not synced"):
             engine.generate_plan("x.com", "token")
 
@@ -132,7 +132,7 @@ class TestApplyPlan:
             ],
         )
 
-        engine = SyncEngine()
+        engine = SyncEngine(alias="test")
         result = engine.apply_plan(plan, "token")
         assert result.all_succeeded
         assert len(result.succeeded) == 1
@@ -160,7 +160,7 @@ class TestApplyPlan:
             ],
         )
 
-        engine = SyncEngine()
+        engine = SyncEngine(alias="test")
         result = engine.apply_plan(plan, "token", force=False)
         assert not result.all_succeeded
         assert len(result.failed) == 1
@@ -188,7 +188,7 @@ class TestApplyPlan:
             ],
         )
 
-        engine = SyncEngine()
+        engine = SyncEngine(alias="test")
         result = engine.apply_plan(plan, "token", force=True)
         assert result.all_succeeded
         mock_cf.delete_record.assert_called_once()

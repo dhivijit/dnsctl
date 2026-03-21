@@ -28,6 +28,26 @@ class _PlanWorker(QThread):
         except Exception as exc:
             self.finished.emit(None, str(exc))
 
+
+class _ApplyWorker(QThread):
+    """Background thread that applies a Plan without blocking the UI."""
+
+    finished = pyqtSignal(object, str)  # result_or_none, error_str
+
+    def __init__(self, engine: SyncEngine, plan, token: str, force: bool) -> None:
+        super().__init__()
+        self._engine = engine
+        self._plan = plan
+        self._token = token
+        self._force = force
+
+    def run(self) -> None:
+        try:
+            result = self._engine.apply_plan(self._plan, self._token, force=self._force)
+            self.finished.emit(result, "")
+        except Exception as exc:
+            self.finished.emit(None, str(exc))
+
 logger = logging.getLogger(__name__)
 
 
@@ -39,14 +59,15 @@ class PlanController:
     to see whether the user pressed Apply.
     """
 
-    def __init__(self, dialog: QDialog, zone_name: str, token: str) -> None:
+    def __init__(self, dialog: QDialog, zone_name: str, token: str, alias: str = "default") -> None:
         self._dialog = dialog
         self._zone_name = zone_name
         self._token = token
-        self._engine = SyncEngine()
+        self._engine = SyncEngine(alias=alias)
         self._plan: Plan | None = None
         self._applied = False
         self._worker: _PlanWorker | None = None
+        self._apply_worker: _ApplyWorker | None = None
 
     # ------------------------------------------------------------------
     # Public
@@ -207,15 +228,15 @@ class PlanController:
                 "</tr>"
             )
 
-            _colors = {
+            _action_colors = {
                 "create": action_create_color,
                 "update": action_update_color,
-                "delete": action_delete_color
+                "delete": action_delete_color,
             }
             _symbols = {"create": "+", "update": "~", "delete": "-"}
 
             for a in plan.actions:
-                color = _colors.get(a.action, _colors["muted"])
+                color = _action_colors.get(a.action, _colors["muted"])
                 symbol = _symbols.get(a.action, "?")
                 prot = "\u26a0 Yes" if a.protected else ""
                 content = esc(a.record.get("content", ""))
@@ -262,30 +283,40 @@ class PlanController:
         d = self._dialog
         d.applyButton.setEnabled(False)
         d.forceApplyButton.setEnabled(False)
+        d.closeButton.setEnabled(False)
         d.summaryLabel.setText("Applying…")
         QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
-        QApplication.processEvents()
 
-        try:
-            result = self._engine.apply_plan(self._plan, self._token, force=force)
-        except Exception as exc:
-            QApplication.restoreOverrideCursor()
-            QMessageBox.critical(d, "Apply Error", str(exc))
+        self._apply_worker = _ApplyWorker(self._engine, self._plan, self._token, force)
+        self._apply_worker.finished.connect(self._on_apply_finished)
+        self._apply_worker.start()
+
+    def _on_apply_finished(self, result, error: str) -> None:
+        QApplication.restoreOverrideCursor()
+        d = self._dialog
+        d.closeButton.setEnabled(True)
+
+        if error:
+            QMessageBox.critical(d, "Apply Error", error)
             d.applyButton.setEnabled(True)
             d.forceApplyButton.setEnabled(True)
+            d.summaryLabel.setText("Apply failed.")
             return
-
-        QApplication.restoreOverrideCursor()
 
         self._applied = True
 
+        sync_warning = (
+            "\n\nWarning: local state could not be refreshed after apply.\n"
+            "Run Sync to bring local state up to date."
+            if result.sync_failed else ""
+        )
         if result.all_succeeded:
             d.summaryLabel.setText(
                 f"Applied {len(result.succeeded)} change(s) successfully."
             )
             QMessageBox.information(
                 d, "Applied",
-                f"All {len(result.succeeded)} change(s) applied successfully.",
+                f"All {len(result.succeeded)} change(s) applied successfully.{sync_warning}",
             )
         else:
             msg = (

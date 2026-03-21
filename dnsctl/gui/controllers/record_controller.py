@@ -204,9 +204,17 @@ class RecordController:
         self._model.endInsertRows()
 
     def update_record(self, old_record: dict, new_record: dict) -> None:
-        """Replace a record in-place by identity (id or reference)."""
+        """Replace a record in-place by identity, id, or composite key."""
+        old_id = old_record.get("id")
+        old_key = (old_record.get("type", ""), old_record.get("name", ""), old_record.get("content", ""))
         for i, r in enumerate(self._model._records):
-            if r is old_record or (r.get('id') and r.get('id') == old_record.get('id')):
+            matched = (
+                r is old_record
+                or (old_id and r.get("id") == old_id)
+                or (not old_id and not r.get("id")
+                    and (r.get("type", ""), r.get("name", ""), r.get("content", "")) == old_key)
+            )
+            if matched:
                 self._model._records[i] = new_record
                 tl = self._model.index(i, 0)
                 br = self._model.index(i, self._model.columnCount() - 1)
@@ -215,8 +223,16 @@ class RecordController:
 
     def delete_record(self, record: dict) -> None:
         """Remove a record from the in-memory list."""
+        rec_id = record.get("id")
+        rec_key = (record.get("type", ""), record.get("name", ""), record.get("content", ""))
         for i, r in enumerate(self._model._records):
-            if r is record or (r.get('id') and r.get('id') == record.get('id')):
+            matched = (
+                r is record
+                or (rec_id and r.get("id") == rec_id)
+                or (not rec_id and not r.get("id")
+                    and (r.get("type", ""), r.get("name", ""), r.get("content", "")) == rec_key)
+            )
+            if matched:
                 self._model.beginRemoveRows(QModelIndex(), i, i)
                 self._model._records.pop(i)
                 self._model.endRemoveRows()

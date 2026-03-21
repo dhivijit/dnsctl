@@ -16,6 +16,8 @@ from dnsctl.core.security import (
     unlock,
 )
 
+_ALIAS = "test_acct"
+
 
 class TestEncryptionRoundtrip:
     def test_roundtrip_succeeds(self):
@@ -40,34 +42,41 @@ class TestEncryptionRoundtrip:
 class TestLoginUnlock:
     @patch("dnsctl.core.security.keyring")
     def test_login_stores_blob(self, mock_kr):
-        login("tok123", "password")
+        # _clear_session tries to delete session keyring entry — let it fail silently
+        mock_kr.errors = MagicMock()
+        mock_kr.errors.PasswordDeleteError = Exception
+        login("tok123", "password", _ALIAS)
         mock_kr.set_password.assert_called_once()
         service, user, blob = mock_kr.set_password.call_args[0]
         assert service == "dnsctl_encrypted_token"
-        assert user == "dnsctl"
+        assert user == _ALIAS
         assert len(blob) > 0
 
     @patch("dnsctl.core.security.keyring")
     def test_is_logged_in_true(self, mock_kr):
         mock_kr.get_password.return_value = "something"
-        assert is_logged_in() is True
+        assert is_logged_in(_ALIAS) is True
 
     @patch("dnsctl.core.security.keyring")
     def test_is_logged_in_false(self, mock_kr):
         mock_kr.get_password.return_value = None
-        assert is_logged_in() is False
+        assert is_logged_in(_ALIAS) is False
 
 
 class TestSession:
     @patch("dnsctl.core.security.keyring")
-    @patch("dnsctl.core.security.SESSION_FILE")
-    def test_get_token_returns_none_when_no_session_file(self, mock_sf, mock_kr):
-        mock_sf.exists.return_value = False
-        assert get_token() is None
+    def test_get_token_returns_none_when_no_session_file(self, mock_kr, tmp_path):
+        with patch("dnsctl.core.security._account_session_file",
+                   return_value=tmp_path / "nonexistent.session"):
+            assert get_token(_ALIAS) is None
 
     @patch("dnsctl.core.security.keyring")
-    @patch("dnsctl.core.security.SESSION_FILE")
-    def test_lock_clears_session(self, mock_sf, mock_kr):
-        mock_sf.exists.return_value = True
-        lock()
-        mock_sf.unlink.assert_called_once()
+    def test_lock_clears_session(self, mock_kr, tmp_path):
+        mock_kr.errors = MagicMock()
+        mock_kr.errors.PasswordDeleteError = Exception
+        session_file = tmp_path / ".session"
+        session_file.touch()
+        with patch("dnsctl.core.security._account_session_file",
+                   return_value=session_file):
+            lock(_ALIAS)
+        assert not session_file.exists()

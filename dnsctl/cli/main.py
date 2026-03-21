@@ -6,30 +6,49 @@ import sys
 
 import click
 
-from dnsctl.config import LOG_FILE, STATE_DIR
+from dnsctl.config import ACCOUNTS_DIR, LOG_FILE, STATE_DIR
 from dnsctl.core.cloudflare_client import CloudflareClient, sanitize_token
 from dnsctl.core.git_manager import GitManager
 from dnsctl.core.security import get_token, is_logged_in, lock, login, logout, unlock
 from dnsctl.core.state_manager import (
+    add_account,
     add_protected_record,
     export_zone,
     get_config,
+    get_current_account,
     import_zone,
     init_state_dir,
+    list_accounts,
     list_synced_zones,
     load_protected_records,
     load_zone,
+    remove_account,
     remove_protected_record,
     save_zone,
     set_config,
+    set_current_account,
+    slugify,
 )
 from dnsctl.core.sync_engine import SyncEngine
 from dnsctl.core.validations import validate_record
 
 logger = logging.getLogger("dnsctl")
 _cf = CloudflareClient()
-_git = GitManager()
-_engine = SyncEngine()
+
+
+def _get_alias() -> str:
+    """Return the current account alias (falls back to 'default')."""
+    return get_current_account() or "default"
+
+
+def _get_git() -> GitManager:
+    """Return a GitManager for the current account."""
+    return GitManager(ACCOUNTS_DIR / _get_alias())
+
+
+def _get_engine() -> SyncEngine:
+    """Return a SyncEngine for the current account."""
+    return SyncEngine(alias=_get_alias())
 
 
 def _setup_logging(verbose: bool) -> None:
@@ -47,7 +66,7 @@ def _setup_logging(verbose: bool) -> None:
 
 def _require_token() -> str:
     """Return the active token or abort with a helpful message."""
-    token = get_token()
+    token = get_token(_get_alias())
     if token is None:
         click.echo("Session locked or expired.  Run 'dnsctl unlock' first.", err=True)
         raise SystemExit(1)
@@ -73,7 +92,7 @@ def cli(verbose: bool) -> None:
 def init() -> None:
     """Initialise the dnsctl state directory (~/.dnsctl/)."""
     path = init_state_dir()
-    _git.auto_init()
+    _get_git().auto_init()
     click.echo(f"Initialised dnsctl state in {path}")
 
 
@@ -82,8 +101,25 @@ def init() -> None:
 # ======================================================================
 
 @cli.command("login")
-def login_cmd() -> None:
+@click.option("--label", "-l", default=None, help="Human-readable account name (e.g. 'Personal', 'Work').")
+@click.option("--alias", "-a", "acct_alias", default=None, help="Short unique identifier (auto-derived from label if omitted).")
+def login_cmd(label: str | None, acct_alias: str | None) -> None:
     """Store a Cloudflare API token (encrypted with a master password)."""
+    if not label:
+        label = click.prompt("Account name (e.g. Personal, Work, Client A)")
+    if not label.strip():
+        click.echo("Account name cannot be empty.", err=True)
+        raise SystemExit(1)
+
+    if not acct_alias:
+        existing_aliases = {a["alias"] for a in list_accounts()}
+        base = slugify(label)
+        acct_alias = base
+        counter = 1
+        while acct_alias in existing_aliases:
+            acct_alias = f"{base}_{counter}"
+            counter += 1
+
     raw_token = getpass.getpass("Cloudflare API token: ")
     if not raw_token.strip():
         click.echo("Token cannot be empty.", err=True)
@@ -111,8 +147,14 @@ def login_cmd() -> None:
     if len(password) < 8:
         click.echo("Password must be at least 8 characters.", err=True)
         raise SystemExit(1)
-    login(token, password)
-    click.echo("Token encrypted and stored.  Run 'dnsctl unlock' to start a session.")
+
+    init_state_dir()
+    add_account(acct_alias, label)
+    login(token, password, acct_alias)
+    set_current_account(acct_alias)
+    git = GitManager(ACCOUNTS_DIR / acct_alias)
+    git.auto_init()
+    click.echo(f"Account \u2018{label}\u2019 ({acct_alias}) stored.  Run 'dnsctl unlock' to start a session.")
 
 
 
@@ -123,18 +165,20 @@ def login_cmd() -> None:
 # ======================================================================
 
 @cli.command("unlock")
-def unlock_cmd() -> None:
+@click.option("--account", "-a", default=None, help="Account alias to unlock.  Defaults to current account.")
+def unlock_cmd(account: str | None) -> None:
     """Unlock the session by entering the master password."""
-    if not is_logged_in():
-        click.echo("No stored token.  Run 'dnsctl login' first.", err=True)
+    alias = account or _get_alias()
+    if not is_logged_in(alias):
+        click.echo(f"No stored token for account \u2018{alias}\u2019.  Run 'dnsctl login' first.", err=True)
         raise SystemExit(1)
     password = getpass.getpass("Master password: ")
     try:
-        unlock(password)
+        unlock(password, alias)
     except Exception:
         click.echo("Wrong password or corrupted token.", err=True)
         raise SystemExit(1)
-    click.echo("Session unlocked.")
+    click.echo(f"Session unlocked for account \u2018{alias}\u2019.")
 
 
 
@@ -150,6 +194,8 @@ def sync(zone: str | None) -> None:
     """Sync DNS records from Cloudflare to local state."""
     init_state_dir()
     token = _require_token()
+    alias = _get_alias()
+    git = _get_git()
 
     zones = _cf.list_zones(token)
     if not zones:
@@ -163,36 +209,37 @@ def sync(zone: str | None) -> None:
             click.echo(f"Zone '{zone}' not found.  Available: {', '.join(z['name'] for z in zones)}", err=True)
             raise SystemExit(1)
 
-    _git.auto_init()
+    git.auto_init()
 
     for z in targets:
         records = _cf.list_records(token, z["id"])
-        state = save_zone(z["id"], z["name"], records)
+        state = save_zone(z["id"], z["name"], records, alias)
         click.echo(f"  Synced {z['name']}  ({len(records)} records, hash={state['state_hash'][:12]})")
 
-    sha = _git.commit(f"Sync with remote ({len(targets)} zone(s))")
+    sha = git.commit(f"Sync with remote ({len(targets)} zone(s))")
     if sha:
         click.echo(f"Committed: {sha[:8]}")
 
-    # Set default zone if not set
+    # Set default zone for this account if not set
     cfg = get_config()
-    if cfg.get("default_zone") is None and targets:
-        set_config("default_zone", targets[0]["name"])
+    default_key = f"default_zone_{alias}"
+    if cfg.get(default_key) is None and targets:
+        set_config(default_key, targets[0]["name"])
 
 
 # ======================================================================
 # Helpers for diff / plan output
 # ======================================================================
 
-def _resolve_zones(zone: str | None) -> list[str]:
+def _resolve_zones(zone: str | None, alias: str) -> list[str]:
     """Resolve a zone argument to a list of zone names."""
     if zone:
         return [zone]
     cfg = get_config()
-    default = cfg.get("default_zone")
+    default = cfg.get(f"default_zone_{alias}")
     if default:
         return [default]
-    synced = list_synced_zones()
+    synced = list_synced_zones(alias)
     if not synced:
         click.echo("No zones synced. Run 'dnsctl sync' first.", err=True)
         raise SystemExit(1)
@@ -260,8 +307,10 @@ def _print_plan(plan) -> None:
 def diff_cmd(zone: str | None) -> None:
     """Show drift between local state and Cloudflare."""
     token = _require_token()
-    for z in _resolve_zones(zone):
-        drift = _engine.detect_drift(z, token)
+    alias = _get_alias()
+    engine = _get_engine()
+    for z in _resolve_zones(zone, alias):
+        drift = engine.detect_drift(z, token)
         if drift is None:
             click.echo(f"{z}: Not synced yet.")
             continue
@@ -281,8 +330,10 @@ def diff_cmd(zone: str | None) -> None:
 def plan_cmd(zone: str | None) -> None:
     """Show planned changes (what would be applied to Cloudflare)."""
     token = _require_token()
-    for z in _resolve_zones(zone):
-        plan = _engine.generate_plan(z, token)
+    alias = _get_alias()
+    engine = _get_engine()
+    for z in _resolve_zones(zone, alias):
+        plan = engine.generate_plan(z, token)
         if not plan.has_changes:
             msg = f"{z}: No changes to apply."
             if plan.drift and plan.drift.has_changes:
@@ -310,13 +361,15 @@ def plan_cmd(zone: str | None) -> None:
 def apply_cmd(zone: str | None, force: bool) -> None:
     """Apply planned changes to Cloudflare."""
     token = _require_token()
-    for z in _resolve_zones(zone):
-        plan = _engine.generate_plan(z, token)
+    alias = _get_alias()
+    engine = _get_engine()
+    for z in _resolve_zones(zone, alias):
+        plan = engine.generate_plan(z, token)
         if not plan.has_changes:
             click.echo(f"{z}: No changes to apply.")
             continue
         click.echo(f"{z}: Applying {plan.summary} …")
-        result = _engine.apply_plan(plan, token, force=force)
+        result = engine.apply_plan(plan, token, force=force)
         if result.all_succeeded:
             click.echo(f"  ✓ Applied {len(result.succeeded)} change(s).")
         else:
@@ -327,15 +380,20 @@ def apply_cmd(zone: str | None, force: bool) -> None:
                     f"{action.record.get('name')}: {err}",
                     fg="red",
                 ))
+        if result.sync_failed:
+            click.echo(click.style(
+                "  ⚠ Post-apply sync failed — local state may be stale. Run 'dnsctl sync'.",
+                fg="yellow",
+            ))
 
 
 # ======================================================================
 # add
 # ======================================================================
 
-def _resolve_single_zone(zone: str | None) -> str:
+def _resolve_single_zone(zone: str | None, alias: str) -> str:
     """Return exactly one zone name or abort."""
-    zones = _resolve_zones(zone)
+    zones = _resolve_zones(zone, alias)
     if len(zones) != 1:
         click.echo("Multiple zones found. Specify --zone.", err=True)
         raise SystemExit(1)
@@ -353,16 +411,25 @@ def _resolve_single_zone(zone: str | None) -> str:
 def add_cmd(zone: str | None, rtype: str, rname: str, content: str,
             ttl: int, priority: int, proxied: bool) -> None:
     """Add a new DNS record to local state."""
-    zone_name = _resolve_single_zone(zone)
-    state = load_zone(zone_name)
+    alias = _get_alias()
+    zone_name = _resolve_single_zone(zone, alias)
+    state = load_zone(zone_name, alias)
     if state is None:
         click.echo(f"Zone '{zone_name}' not synced. Run 'dnsctl sync' first.", err=True)
         raise SystemExit(1)
 
-    # Auto-append zone name if bare subdomain
-    if rname and not rname.endswith(zone_name):
-        if "." not in rname or not rname.endswith("."):
+    # Auto-append zone name if bare subdomain; warn for ambiguous multi-dot names
+    if rname and not rname.endswith(zone_name) and not rname.endswith("."):
+        if "." not in rname:
             rname = f"{rname}.{zone_name}"
+        else:
+            proposed = f"{rname}.{zone_name}"
+            click.echo(
+                f"Warning: '{rname}' doesn't end with the zone '{zone_name}'.",
+                err=True,
+            )
+            if click.confirm(f"Append zone to make it '{proposed}'?", default=True):
+                rname = proposed
 
     record: dict = {"type": rtype, "name": rname, "content": content, "ttl": ttl, "proxied": proxied}
     if rtype in ("MX", "SRV"):
@@ -375,9 +442,10 @@ def add_cmd(zone: str | None, rtype: str, rname: str, content: str,
 
     records = state["records"]
     records.append(record)
-    save_zone(state["zone_id"], zone_name, records)
-    _git.auto_init()
-    _git.commit(f"Add {rtype} {rname}")
+    save_zone(state["zone_id"], zone_name, records, alias)
+    git = _get_git()
+    git.auto_init()
+    git.commit(f"Add {rtype} {rname}")
     click.echo(f"Added {rtype} {rname} → {content}")
     click.echo("Run 'dnsctl plan' to review, then 'dnsctl apply' to push to Cloudflare.")
 
@@ -397,8 +465,9 @@ def add_cmd(zone: str | None, rtype: str, rname: str, content: str,
 def edit_cmd(zone: str | None, rname: str, rtype: str, content: str | None,
              ttl: int | None, priority: int | None, proxied: bool | None) -> None:
     """Edit an existing DNS record in local state."""
-    zone_name = _resolve_single_zone(zone)
-    state = load_zone(zone_name)
+    alias = _get_alias()
+    zone_name = _resolve_single_zone(zone, alias)
+    state = load_zone(zone_name, alias)
     if state is None:
         click.echo(f"Zone '{zone_name}' not synced.", err=True)
         raise SystemExit(1)
@@ -428,9 +497,10 @@ def edit_cmd(zone: str | None, rname: str, rtype: str, content: str | None,
         click.echo(f"Validation error: {err}", err=True)
         raise SystemExit(1)
 
-    save_zone(state["zone_id"], zone_name, state["records"])
-    _git.auto_init()
-    _git.commit(f"Edit {rtype} {rname}")
+    save_zone(state["zone_id"], zone_name, state["records"], alias)
+    git = _get_git()
+    git.auto_init()
+    git.commit(f"Edit {rtype} {rname}")
     click.echo(f"Updated {rtype} {rname}")
     click.echo("Run 'dnsctl plan' to review, then 'dnsctl apply' to push to Cloudflare.")
 
@@ -446,8 +516,9 @@ def edit_cmd(zone: str | None, rname: str, rtype: str, content: str | None,
 @click.confirmation_option(prompt="Delete this record from local state?")
 def rm_cmd(zone: str | None, rname: str, rtype: str) -> None:
     """Remove a DNS record from local state."""
-    zone_name = _resolve_single_zone(zone)
-    state = load_zone(zone_name)
+    alias = _get_alias()
+    zone_name = _resolve_single_zone(zone, alias)
+    state = load_zone(zone_name, alias)
     if state is None:
         click.echo(f"Zone '{zone_name}' not synced.", err=True)
         raise SystemExit(1)
@@ -461,9 +532,10 @@ def rm_cmd(zone: str | None, rname: str, rtype: str) -> None:
         click.echo(f"No {rtype} record named '{rname}' found.", err=True)
         raise SystemExit(1)
 
-    save_zone(state["zone_id"], zone_name, state["records"])
-    _git.auto_init()
-    _git.commit(f"Delete {rtype} {rname}")
+    save_zone(state["zone_id"], zone_name, state["records"], alias)
+    git = _get_git()
+    git.auto_init()
+    git.commit(f"Delete {rtype} {rname}")
     removed = before - after
     click.echo(f"Removed {removed} record(s): {rtype} {rname}")
     click.echo("Run 'dnsctl plan' to review, then 'dnsctl apply' to push to Cloudflare.")
@@ -478,9 +550,10 @@ def rm_cmd(zone: str | None, rname: str, rtype: str) -> None:
 def rollback_cmd(commit: str) -> None:
     """Rollback state to a previous git commit."""
     _require_token()
-    _git.auto_init()
+    git = _get_git()
+    git.auto_init()
 
-    history = _git.log()
+    history = git.log()
     if not history:
         click.echo("No git history found. Nothing to roll back to.", err=True)
         raise SystemExit(1)
@@ -493,7 +566,7 @@ def rollback_cmd(commit: str) -> None:
         raise SystemExit(1)
 
     try:
-        new_sha = _git.rollback(commit)
+        new_sha = git.rollback(commit)
         click.echo(f"Rolled back to {commit}")
         click.echo(f"New commit: {new_sha[:8]}")
         click.echo("Run 'dnsctl plan' to review, then 'dnsctl apply' to push to Cloudflare.")
@@ -510,8 +583,9 @@ def rollback_cmd(commit: str) -> None:
 @click.option("--count", "-n", default=20, type=int, help="Number of commits to show.")
 def log_cmd(count: int) -> None:
     """Show git commit history for the state directory."""
-    _git.auto_init()
-    history = _git.log(max_count=count)
+    git = _get_git()
+    git.auto_init()
+    history = git.log(max_count=count)
     if not history:
         click.echo("No history yet.")
         return
@@ -539,7 +613,7 @@ def export_cmd(zone: str | None, outfile: str | None) -> None:
     dest = Path(outfile)
 
     try:
-        export_zone(zone_name, dest)
+        export_zone(zone_name, dest, _get_alias())
         click.echo(f"Exported {zone_name} → {dest}")
     except FileNotFoundError as exc:
         click.echo(str(exc), err=True)
@@ -558,15 +632,17 @@ def import_cmd(file: str) -> None:
 
     init_state_dir()
     src = Path(file)
+    alias = _get_alias()
 
     try:
-        state = import_zone(src)
+        state = import_zone(src, alias)
         zone_name = state["zone_name"]
         n = len(state.get("records", []))
         click.echo(f"Imported {zone_name} ({n} records)")
 
-        _git.auto_init()
-        sha = _git.commit(f"Imported state for {zone_name}")
+        git = _get_git()
+        git.auto_init()
+        sha = git.commit(f"Imported state for {zone_name}")
         if sha:
             click.echo(f"Committed: {sha[:8]}")
     except ValueError as exc:
@@ -619,15 +695,28 @@ def protected_cmd() -> None:
 @cli.command()
 def status() -> None:
     """Show current dnsctl status."""
+    alias = _get_alias()
     click.echo(f"State directory: {STATE_DIR}")
-    click.echo(f"Logged in: {is_logged_in()}")
-    click.echo(f"Session active: {get_token() is not None}")
 
-    synced = list_synced_zones()
+    # Show all accounts
+    accounts = list_accounts()
+    if accounts:
+        click.echo(f"Accounts ({len(accounts)}):")
+        for a in accounts:
+            marker = "*" if a["alias"] == alias else " "
+            logged = is_logged_in(a["alias"])
+            session = get_token(a["alias"]) is not None
+            click.echo(f"  {marker} {a['alias']}  ({a['label']})  logged_in={logged}  session={session}")
+    else:
+        click.echo(f"Current account: {alias}")
+        click.echo(f"Logged in: {is_logged_in(alias)}")
+        click.echo(f"Session active: {get_token(alias) is not None}")
+
+    synced = list_synced_zones(alias)
     if synced:
         click.echo(f"Synced zones ({len(synced)}):")
         for name in synced:
-            state = load_zone(name)
+            state = load_zone(name, alias)
             if state:
                 n = len(state.get("records", []))
                 ts = state.get("last_synced_at", "?")
@@ -636,7 +725,7 @@ def status() -> None:
         click.echo("No zones synced yet.  Run 'dnsctl sync'.")
 
     cfg = get_config()
-    default = cfg.get("default_zone")
+    default = cfg.get(f"default_zone_{alias}")
     if default:
         click.echo(f"Default zone: {default}")
 
@@ -648,7 +737,7 @@ def status() -> None:
 @cli.command("lock")
 def lock_cmd() -> None:
     """Lock the current session (clear cached token)."""
-    lock()
+    lock(_get_alias())
     click.echo("Session locked.")
 
 
@@ -661,10 +750,73 @@ def lock_cmd() -> None:
 
 @cli.command("logout")
 def logout_cmd() -> None:
-    """Remove all stored credentials."""
-    logout()
-    click.echo("Logged out.  All stored credentials removed.")
+    """Remove all stored credentials for the current account."""
+    alias = _get_alias()
+    logout(alias)
+    click.echo(f"Logged out account \u2018{alias}\u2019.  All stored credentials removed.")
 
+
+
+# ======================================================================
+# accounts group
+# ======================================================================
+
+@cli.group("accounts")
+def accounts_group() -> None:
+    """Manage multiple Cloudflare accounts."""
+
+
+@accounts_group.command("list")
+def accounts_list_cmd() -> None:
+    """List all stored accounts."""
+    accounts = list_accounts()
+    current = _get_alias()
+    if not accounts:
+        click.echo("No accounts.  Run 'dnsctl login' to add one.")
+        return
+    for a in accounts:
+        marker = "*" if a["alias"] == current else " "
+        click.echo(f"  {marker} {a['alias']}  ({a['label']})")
+
+
+@accounts_group.command("switch")
+@click.argument("alias")
+def accounts_switch_cmd(alias: str) -> None:
+    """Switch the active account."""
+    known = {a["alias"] for a in list_accounts()}
+    if alias not in known:
+        click.echo(f"Account '{alias}' not found.", err=True)
+        raise SystemExit(1)
+    set_current_account(alias)
+    click.echo(f"Switched to account \u2018{alias}\u2019.")
+
+
+@accounts_group.command("remove")
+@click.argument("alias")
+@click.confirmation_option(prompt="Remove this account? All local zone data will be deleted.")
+def accounts_remove_cmd(alias: str) -> None:
+    """Remove a stored account and all its local zone data."""
+    from dnsctl.core.security import logout as sec_logout
+
+    accounts = list_accounts()
+    if len(accounts) <= 1:
+        click.echo("Cannot remove the last account.", err=True)
+        raise SystemExit(1)
+    known = {a["alias"] for a in accounts}
+    if alias not in known:
+        click.echo(f"Account '{alias}' not found.", err=True)
+        raise SystemExit(1)
+
+    sec_logout(alias)
+    remove_account(alias)
+    click.echo(f"Removed account \u2018{alias}\u2019.")
+
+    # Auto-switch if this was the current account
+    if get_current_account() == alias:
+        remaining = list_accounts()
+        if remaining:
+            set_current_account(remaining[0]["alias"])
+            click.echo(f"Switched to account \u2018{remaining[0]['alias']}\u2019.")
 
 
 # ======================================================================

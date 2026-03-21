@@ -140,9 +140,15 @@ def compute_diff(base: list[dict], target: list[dict]) -> DiffResult:
     base_key_map = {record_key(r): r for r in base_no_id}
     target_key_map = {record_key(r): r for r in target_no_id}
 
-    for key, rec in target_key_map.items():
+    for key, target_rec in target_key_map.items():
         if key not in base_key_map:
-            result.added.append(rec)
+            result.added.append(target_rec)
+        else:
+            base_rec = base_key_map[key]
+            if records_equal(base_rec, target_rec):
+                result.unchanged.append(base_rec)
+            else:
+                result.modified.append({"before": base_rec, "after": target_rec})
 
     for key, rec in base_key_map.items():
         if key not in target_key_map:

@@ -9,69 +9,77 @@ import pytest
 
 from dnsctl.core import state_manager
 
+_ALIAS = "test"
+
 
 @pytest.fixture
 def tmp_state(tmp_path):
     """Patch all state directory paths to a temp dir for isolation."""
-    zones = tmp_path / "zones"
+    accounts_dir = tmp_path / "accounts"
+    accounts_file = tmp_path / "accounts.json"
     logs = tmp_path / "logs"
     metadata = tmp_path / "metadata.json"
     config = tmp_path / "config.json"
-    gitignore = tmp_path / ".gitignore"
 
-    patches = {
-        "core.state_manager.STATE_DIR": tmp_path,
-        "core.state_manager.ZONES_DIR": zones,
-        "core.state_manager.LOGS_DIR": logs,
-        "core.state_manager.METADATA_FILE": metadata,
-        "core.state_manager.CONFIG_FILE": config,
-        "core.state_manager.GITIGNORE_FILE": gitignore,
-    }
-    with patch.multiple("dnsctl.core.state_manager", **{k.split(".")[-1]: v for k, v in patches.items()}):
+    with patch.multiple(
+        "dnsctl.core.state_manager",
+        STATE_DIR=tmp_path,
+        ACCOUNTS_DIR=accounts_dir,
+        ACCOUNTS_FILE=accounts_file,
+        LOGS_DIR=logs,
+        METADATA_FILE=metadata,
+        CONFIG_FILE=config,
+        _LEGACY_ZONES_DIR=tmp_path / "zones",
+    ):
         yield tmp_path
 
 
 class TestInitStateDir:
     def test_creates_directories_and_files(self, tmp_state):
-        state_manager.init_state_dir()
-        assert (tmp_state / "zones").is_dir()
+        # Prevent migration from hitting real keyring
+        with patch("dnsctl.core.state_manager._migrate_legacy"):
+            state_manager.init_state_dir()
+        assert (tmp_state / "accounts").is_dir()
         assert (tmp_state / "logs").is_dir()
         assert (tmp_state / "metadata.json").exists()
         assert (tmp_state / "config.json").exists()
-        assert (tmp_state / ".gitignore").exists()
 
     def test_idempotent(self, tmp_state):
-        state_manager.init_state_dir()
-        state_manager.init_state_dir()
-        assert (tmp_state / "zones").is_dir()
+        with patch("dnsctl.core.state_manager._migrate_legacy"):
+            state_manager.init_state_dir()
+            state_manager.init_state_dir()
+        assert (tmp_state / "accounts").is_dir()
 
 
 class TestZonePersistence:
     def test_save_and_load(self, tmp_state):
-        state_manager.init_state_dir()
+        with patch("dnsctl.core.state_manager._migrate_legacy"):
+            state_manager.init_state_dir()
         records = [
             {"id": "r1", "type": "A", "name": "example.com", "content": "1.2.3.4", "ttl": 300, "proxied": False}
         ]
-        state = state_manager.save_zone("z1", "example.com", records)
+        state = state_manager.save_zone("z1", "example.com", records, _ALIAS)
         assert state["zone_id"] == "z1"
         assert state["zone_name"] == "example.com"
         assert len(state["records"]) == 1
         assert state["state_hash"]
 
-        loaded = state_manager.load_zone("example.com")
+        loaded = state_manager.load_zone("example.com", _ALIAS)
         assert loaded is not None
         assert loaded["zone_id"] == "z1"
         assert loaded["records"] == records
 
     def test_load_nonexistent_returns_none(self, tmp_state):
-        state_manager.init_state_dir()
-        assert state_manager.load_zone("nosuchzone.com") is None
+        with patch("dnsctl.core.state_manager._migrate_legacy"):
+            state_manager.init_state_dir()
+        assert state_manager.load_zone("nosuchzone.com", _ALIAS) is None
 
     def test_list_synced_zones(self, tmp_state):
-        state_manager.init_state_dir()
-        state_manager.save_zone("z1", "alpha.com", [])
-        state_manager.save_zone("z2", "beta.com", [])
-        zones = state_manager.list_synced_zones()
+        with patch("dnsctl.core.state_manager._migrate_legacy"):
+            state_manager.init_state_dir()
+        state_manager.save_zone("z1", "alpha.com", [], _ALIAS)
+        state_manager.save_zone("z2", "beta.com", [], _ALIAS)
+        zones = state_manager.list_synced_zones(_ALIAS)
         assert zones == ["alpha.com", "beta.com"]
 
 

@@ -12,7 +12,14 @@ from PyQt6 import uic
 
 from dnsctl.config import LOG_FILE
 from dnsctl.core.security import get_token, is_logged_in
-from dnsctl.core.state_manager import init_state_dir
+from dnsctl.core.state_manager import (
+    init_state_dir,
+    list_accounts,
+    add_account,
+    get_current_account,
+    set_current_account,
+    slugify,
+)
 from dnsctl.gui import theme as _gui_theme
 from dnsctl.gui.controllers.main_controller import MainController
 
@@ -59,7 +66,7 @@ def _set_platform_icon():
             # On Windows, we need to set the AppUserModelID to prevent
             # the app from being grouped with python.exe in the taskbar
             import ctypes
-            myappid = 'dhivijit.dnsctl.gui.1.0.0'  # arbitrary string
+            myappid = 'dhivijit.dnsctl.gui.1.1.0'  # arbitrary string
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
         except Exception:
             pass  # Failed to set, continue anyway
@@ -79,19 +86,51 @@ def _load_ui(name: str):
     return widget
 
 
-def _show_login_dialog(app: QApplication) -> bool:
-    """Show the login dialog.  Returns True if login succeeded."""
-    from dnsctl.core.security import login
+def _show_login_dialog(app: QApplication, alias: str | None = None, reuse_password: str | None = None) -> bool:
+    """Show the login dialog.  Returns True if login succeeded.
+
+    If *alias* is ``None``, the user fills in an account name which becomes
+    the new alias.  If *alias* is provided (re-login), the name field is
+    pre-filled and disabled.
+
+    If *reuse_password* is provided, the password fields are hidden and that
+    password is used automatically (for adding secondary accounts).
+    """
+    from dnsctl.core.security import login, unlock
     from dnsctl.core.cloudflare_client import sanitize_token
 
     dialog = _load_ui("login_dialog.ui")
     colors = _gui_theme.SEMANTIC_COLORS[_gui_theme.load_theme_pref()]
     dialog.errorLabel.setStyleSheet(f"color: {colors['error']};")
+
+    # If re-login for an existing account, lock the name field
+    if alias is not None:
+        accounts = list_accounts()
+        label = next((a["label"] for a in accounts if a["alias"] == alias), alias)
+        dialog.accountNameEdit.setText(label)
+        dialog.accountNameEdit.setEnabled(False)
+        dialog.headerLabel.setText(
+            f"Re-enter your Cloudflare API token for account \u2018{label}\u2019."
+        )
+
+    # When reusing a password (adding secondary account), hide password rows
+    if reuse_password is not None:
+        dialog.passwordLabel.hide()
+        dialog.passwordEdit.hide()
+        dialog.confirmLabel.hide()
+        dialog.confirmEdit.hide()
+        dialog.headerLabel.setText(
+            "Enter a name and your Cloudflare API token.\n"
+            "Your existing master password will be used to secure it."
+        )
+        dialog.adjustSize()
+
     # Hover glow on dialog buttons
     from dnsctl.gui.hover_anim import install_hover_animation as _ha
     _accent = _gui_theme.ACCENT_COLOR[_gui_theme.load_theme_pref()]
     _ha(dialog.loginButton, color=_accent)
     _ha(dialog.cancelButton, color=_accent)
+
     def on_help():
         from PyQt6.QtWidgets import QMessageBox
         msg = QMessageBox(dialog)
@@ -112,27 +151,47 @@ def _show_login_dialog(app: QApplication) -> bool:
     dialog.helpButton.clicked.connect(on_help)
 
     def on_login():
+        name_label = dialog.accountNameEdit.text().strip()
         raw_token = dialog.tokenEdit.text().strip()
-        password = dialog.passwordEdit.text()
-        confirm = dialog.confirmEdit.text()
 
+        # --- validate account name (new accounts only) ---
+        if alias is None:
+            if not name_label:
+                dialog.errorLabel.setText("Account name is required.")
+                return
+            # Slugify and deduplicate
+            slug = slugify(name_label)
+            existing_aliases = {a["alias"] for a in list_accounts()}
+            base = slug
+            n = 2
+            while slug in existing_aliases:
+                slug = f"{base}_{n}"
+                n += 1
+            account_alias = slug
+        else:
+            account_alias = alias
+            name_label = dialog.accountNameEdit.text().strip()
+
+        # --- validate token / password ---
         if not raw_token:
             dialog.errorLabel.setText("API token is required.")
             return
-
-        # Sanitize the pasted token (strip curl commands, Bearer prefix, etc.)
         try:
             token = sanitize_token(raw_token)
         except ValueError as exc:
             dialog.errorLabel.setText(str(exc))
             return
 
-        if len(password) < 8:
-            dialog.errorLabel.setText("Password must be at least 8 characters.")
-            return
-        if password != confirm:
-            dialog.errorLabel.setText("Passwords do not match.")
-            return
+        # Use the reused password if provided, otherwise read from fields
+        password = reuse_password if reuse_password is not None else dialog.passwordEdit.text()
+
+        if reuse_password is None:
+            if len(password) < 8:
+                dialog.errorLabel.setText("Password must be at least 8 characters.")
+                return
+            if password != dialog.confirmEdit.text():
+                dialog.errorLabel.setText("Passwords do not match.")
+                return
 
         # Verify the token against Cloudflare in a background thread
         dialog.errorLabel.setText("Verifying token with Cloudflare…")
@@ -141,36 +200,62 @@ def _show_login_dialog(app: QApplication) -> bool:
 
         worker = _VerifyWorker(token)
         dialog._verify_worker = worker  # keep alive during execution
+        dialog._verify_cancelled = False
 
         def on_verified(success: bool, error: str) -> None:
             QApplication.restoreOverrideCursor()
+            if dialog._verify_cancelled:
+                return  # dialog was cancelled; ignore the result
             if not success:
                 dialog.errorLabel.setStyleSheet(f"color: {colors['error']};")
                 dialog.errorLabel.setText(f"Token verification failed: {error}")
                 dialog.loginButton.setEnabled(True)
                 return
             try:
-                login(token, password)
+                if alias is None:
+                    add_account(account_alias, name_label)
+                    set_current_account(account_alias)
+                    # Init per-account git repo
+                    from dnsctl.core.git_manager import GitManager
+                    from dnsctl.config import ACCOUNTS_DIR
+                    GitManager(ACCOUNTS_DIR / account_alias).auto_init()
+                login(token, password, account_alias)
+                # Start the session immediately so get_token() works right away
+                unlock(password, account_alias)
                 dialog.accept()
             except Exception as exc:
                 dialog.errorLabel.setStyleSheet(f"color: {colors['error']};")
                 dialog.errorLabel.setText(f"Login failed: {exc}")
                 dialog.loginButton.setEnabled(True)
 
+        def on_cancel() -> None:
+            dialog._verify_cancelled = True
+            worker.quit()
+            dialog.reject()
+
         worker.finished.connect(on_verified)
         QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
         worker.start()
 
+    dialog._verify_cancelled = False  # initialise before any click handler runs
+
+    def _cancel() -> None:
+        if hasattr(dialog, "_verify_worker") and dialog._verify_worker is not None:
+            dialog._verify_cancelled = True
+            dialog._verify_worker.quit()
+            QApplication.restoreOverrideCursor()
+        dialog.reject()
+
     dialog.loginButton.clicked.connect(on_login)
-    dialog.cancelButton.clicked.connect(dialog.reject)
+    dialog.cancelButton.clicked.connect(_cancel)
     return dialog.exec() == 1  # QDialog.DialogCode.Accepted
 
 
 _FORGOT_PASSWORD = "__forgot__"
 
 
-def _show_unlock_dialog(app: QApplication) -> str | None:
-    """Show the unlock dialog.  Returns the token, or None on cancel.
+def _show_unlock_dialog(app: QApplication, alias: str = "default", label: str = "") -> str | None:
+    """Show the unlock dialog for *alias*.  Returns the token, or None on cancel.
 
     If the user clicks Forgot Password, stored credentials are wiped and
     the sentinel ``_FORGOT_PASSWORD`` is returned so the caller can show
@@ -183,6 +268,12 @@ def _show_unlock_dialog(app: QApplication) -> str | None:
     _uc = _gui_theme.SEMANTIC_COLORS[_gui_theme.load_theme_pref()]
     dialog.errorLabel.setStyleSheet(f"color: {_uc['error']};")
     dialog.forgotButton.setStyleSheet(f"color: {_uc['danger']};")
+
+    # Show which account is being unlocked
+    account_display = label or alias
+    if hasattr(dialog, "headerLabel") and account_display:
+        dialog.headerLabel.setText(f"Enter your master password for account \u2018{account_display}\u2019.")
+
     # Hover glow on dialog buttons
     from dnsctl.gui.hover_anim import install_hover_animation as _ha2
     _accent2 = _gui_theme.ACCENT_COLOR[_gui_theme.load_theme_pref()]
@@ -197,23 +288,32 @@ def _show_unlock_dialog(app: QApplication) -> str | None:
             dialog.errorLabel.setText("Password is required.")
             return
         try:
-            result["token"] = unlock(password)
+            result["token"] = unlock(password, alias)
             dialog.accept()
         except Exception:
             dialog.errorLabel.setText("Wrong password.")
 
     def on_forgot():
+        from dnsctl.core.state_manager import list_accounts as _list_accts, remove_account as _remove_acct
+        all_accounts = _list_accts()
+        account_names = ", ".join(f"\u2018{a['label']}\u2019" for a in all_accounts)
         confirm = QMessageBox.warning(
             dialog,
             "Forgot Password",
-            "This will delete all stored credentials.\n"
-            "You will need to re-enter your Cloudflare API token.\n\n"
-            "Continue?",
+            "This will permanently delete ALL stored accounts and their local zone data.\n\n"
+            f"Accounts that will be removed: {account_names}\n\n"
+            "You will need to re-add your Cloudflare accounts from scratch.\n"
+            "This action cannot be undone.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
         if confirm == QMessageBox.StandardButton.Yes:
-            logout()
+            for account in all_accounts:
+                logout(account["alias"])
+                try:
+                    _remove_acct(account["alias"])
+                except Exception:
+                    pass
             result["token"] = _FORGOT_PASSWORD
             dialog.accept()
 
@@ -224,6 +324,7 @@ def _show_unlock_dialog(app: QApplication) -> str | None:
     if dialog.exec() == 1:
         return result["token"]
     return None
+
 
 
 def main() -> None:
@@ -254,29 +355,46 @@ def main() -> None:
         app.setWindowIcon(QIcon(str(ICON_PATH)))
 
     # --- Authentication flow ---
-    if not is_logged_in():
+    accounts = list_accounts()
+    if not accounts:
+        # Fresh install or all accounts removed — add first account
         if not _show_login_dialog(app):
             sys.exit(0)
+        accounts = list_accounts()
+        if not accounts:
+            sys.exit(0)
 
-    # After login or if already logged in, check session
-    token = get_token()
+    alias = get_current_account() or accounts[0]["alias"]
+    # Ensure alias is valid (e.g. if config was edited manually)
+    if not any(a["alias"] == alias for a in accounts):
+        alias = accounts[0]["alias"]
+    label = next((a["label"] for a in accounts if a["alias"] == alias), alias)
+
+    if not is_logged_in(alias):
+        # Keyring entry missing — force re-login for this account
+        if not _show_login_dialog(app, alias=alias):
+            sys.exit(0)
+
+    token = get_token(alias)
     if token is None:
-        token = _show_unlock_dialog(app)
+        token = _show_unlock_dialog(app, alias=alias, label=label)
         if token is None:
             sys.exit(0)
         if token == _FORGOT_PASSWORD:
-            # Credentials wiped — restart with login dialog
+            # All accounts wiped — start fresh with a new account
             if not _show_login_dialog(app):
                 sys.exit(0)
-            token = get_token()
+            accounts = list_accounts()
+            if not accounts:
+                sys.exit(0)
+            alias = accounts[0]["alias"]
+            token = get_token(alias)
             if token is None:
-                token = _show_unlock_dialog(app)
-                if token is None or token == _FORGOT_PASSWORD:
-                    sys.exit(0)
+                sys.exit(0)
 
     # --- Main window ---
     window = _load_ui("main_window.ui")
-    controller = MainController(window, token, theme_mode=_current_theme)
+    controller = MainController(window, token, alias=alias, theme_mode=_current_theme)
     controller.setup()
     window.show()
 

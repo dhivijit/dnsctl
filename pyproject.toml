@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dnsctl-app"
-version = "1.0.0"
+version = "1.1.0"
 authors = [{ name = "Dhivijit Koppuravuri", email = "me@dhivijit.dev" }]
 description = "Secure, version-controlled DNS management tool with CLI and GUI"
 readme = "README.md"

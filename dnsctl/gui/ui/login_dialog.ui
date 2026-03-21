@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>400</width>
-    <height>260</height>
+    <height>295</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -20,23 +20,37 @@
    <item>
     <widget class="QLabel" name="headerLabel">
      <property name="text">
-      <string>Enter your Cloudflare API token and set a master password.</string>
-     </property>
-     <property name="wordWrap">
-      <bool>true</bool>
-     </property>
-    </widget>
-   </item>
-   <item>
-    <layout class="QFormLayout" name="formLayout">
-     <item row="0" column="0">
-      <widget class="QLabel" name="tokenLabel">
-       <property name="text">
-        <string>API Token:</string>
-       </property>
-      </widget>
-     </item>
-     <item row="0" column="1">
+       <string>Enter a name for this account, your Cloudflare API token, and a master password.</string>
+      </property>
+      <property name="wordWrap">
+       <bool>true</bool>
+      </property>
+     </widget>
+    </item>
+    <item>
+     <layout class="QFormLayout" name="formLayout">
+      <item row="0" column="0">
+       <widget class="QLabel" name="accountNameLabel">
+        <property name="text">
+         <string>Account Name:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QLineEdit" name="accountNameEdit">
+        <property name="placeholderText">
+         <string>e.g. Personal, Work, Client A</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="tokenLabel">
+        <property name="text">
+         <string>API Token:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
       <layout class="QHBoxLayout" name="tokenLayout">
        <property name="spacing">
         <number>4</number>
@@ -69,14 +83,14 @@
        </item>
       </layout>
      </item>
-     <item row="1" column="0">
+     <item row="2" column="0">
       <widget class="QLabel" name="passwordLabel">
        <property name="text">
         <string>Master Password:</string>
        </property>
       </widget>
      </item>
-     <item row="1" column="1">
+     <item row="2" column="1">
       <widget class="QLineEdit" name="passwordEdit">
        <property name="echoMode">
         <enum>QLineEdit::EchoMode::Password</enum>
@@ -86,14 +100,14 @@
        </property>
       </widget>
      </item>
-     <item row="2" column="0">
+     <item row="3" column="0">
       <widget class="QLabel" name="confirmLabel">
        <property name="text">
         <string>Confirm Password:</string>
        </property>
       </widget>
      </item>
-     <item row="2" column="1">
+     <item row="3" column="1">
       <widget class="QLineEdit" name="confirmEdit">
        <property name="echoMode">
         <enum>QLineEdit::EchoMode::Password</enum>

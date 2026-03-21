@@ -1,9 +1,16 @@
-"""Secure token storage — AES-256-GCM + PBKDF2 + OS keyring."""
+"""Secure token storage — AES-256-GCM + PBKDF2 + OS keyring.
+
+All public functions accept an *alias* parameter identifying which
+Cloudflare account the credential belongs to.  Account credentials are
+stored in the OS keyring under ``<alias>`` as the username, and the
+per-account session file lives at ``~/.dnsctl/accounts/<alias>/.session``.
+"""
 
 import base64
 import json
 import os
 import time
+from pathlib import Path
 
 import keyring
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -11,13 +18,17 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 
 from dnsctl.config import (
+    ACCOUNTS_DIR,
     KEYRING_SERVICE_ENCRYPTED,
     KEYRING_SERVICE_SESSION,
-    KEYRING_USERNAME,
     PBKDF2_ITERATIONS,
-    SESSION_FILE,
     SESSION_TIMEOUT_SECONDS,
 )
+
+# ---------------------------------------------------------------------------
+# In-memory password cache (cleared on lock/logout, never written to disk)
+# ---------------------------------------------------------------------------
+_session_passwords: dict[str, str] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -66,41 +77,62 @@ def _decrypt_token(encoded_blob: str, password: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Per-account session file helper
+# ---------------------------------------------------------------------------
+
+def _account_session_file(alias: str) -> Path:
+    """Return the path to the session timestamp file for *alias*."""
+    return ACCOUNTS_DIR / alias / ".session"
+
+
+def get_cached_password(alias: str) -> str | None:
+    """Return the in-memory cached master password for *alias*, if available.
+
+    The password is cached after a successful ``login()`` or ``unlock()`` call
+    and is cleared when the session is locked or the credentials are removed.
+    It is never persisted to disk.
+    """
+    return _session_passwords.get(alias)
+
+
+# ---------------------------------------------------------------------------
 # Login — store encrypted token in keyring
 # ---------------------------------------------------------------------------
 
-def login(token: str, password: str) -> None:
-    """Encrypt *token* and persist the blob in the OS keyring."""
+def login(token: str, password: str, alias: str) -> None:
+    """Encrypt *token* and persist the blob in the OS keyring for *alias*."""
     blob = _encrypt_token(token, password)
-    keyring.set_password(KEYRING_SERVICE_ENCRYPTED, KEYRING_USERNAME, blob)
-    # Clear any stale session
-    _clear_session()
+    keyring.set_password(KEYRING_SERVICE_ENCRYPTED, alias, blob)
+    _session_passwords[alias] = password
+    # Clear any stale session for this account
+    _clear_session(alias)
 
 
-def is_logged_in() -> bool:
-    """Return True if an encrypted token blob exists in the keyring."""
-    return keyring.get_password(KEYRING_SERVICE_ENCRYPTED, KEYRING_USERNAME) is not None
+def is_logged_in(alias: str) -> bool:
+    """Return True if an encrypted token blob exists in the keyring for *alias*."""
+    return keyring.get_password(KEYRING_SERVICE_ENCRYPTED, alias) is not None
 
 
 # ---------------------------------------------------------------------------
 # Unlock — decrypt and cache token for SESSION_TIMEOUT_SECONDS
 # ---------------------------------------------------------------------------
 
-def unlock(password: str) -> str:
-    """Decrypt the stored token and cache it in the session keyring entry.
+def unlock(password: str, alias: str) -> str:
+    """Decrypt the stored token for *alias* and cache it for the session.
 
     Returns the plaintext token.  Raises ``ValueError`` if not logged in,
     or ``cryptography`` exceptions on wrong password.
     """
-    blob = keyring.get_password(KEYRING_SERVICE_ENCRYPTED, KEYRING_USERNAME)
+    blob = keyring.get_password(KEYRING_SERVICE_ENCRYPTED, alias)
     if blob is None:
-        raise ValueError("Not logged in. Run 'dnsctl login' first.")
+        raise ValueError(f"Not logged in for account '{alias}'. Run 'dnsctl login' first.")
 
     token = _decrypt_token(blob, password)
 
     # Cache the token in a separate session keyring entry
-    keyring.set_password(KEYRING_SERVICE_SESSION, KEYRING_USERNAME, token)
-    _touch_session()
+    keyring.set_password(KEYRING_SERVICE_SESSION, alias, token)
+    _session_passwords[alias] = password
+    _touch_session(alias)
     return token
 
 
@@ -108,56 +140,61 @@ def unlock(password: str) -> str:
 # Session helpers
 # ---------------------------------------------------------------------------
 
-def _touch_session() -> None:
-    """Write current Unix timestamp to the session file."""
-    SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
-    SESSION_FILE.write_text(str(time.time()))
+def _touch_session(alias: str) -> None:
+    """Write current Unix timestamp to the session file for *alias*."""
+    f = _account_session_file(alias)
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(str(time.time()))
 
 
-def _clear_session() -> None:
-    """Remove session token from keyring and delete session file."""
+def _clear_session(alias: str) -> None:
+    """Remove session token from keyring and delete session file for *alias*."""
     try:
-        keyring.delete_password(KEYRING_SERVICE_SESSION, KEYRING_USERNAME)
+        keyring.delete_password(KEYRING_SERVICE_SESSION, alias)
     except keyring.errors.PasswordDeleteError:
         pass
-    if SESSION_FILE.exists():
-        SESSION_FILE.unlink()
+    f = _account_session_file(alias)
+    if f.exists():
+        f.unlink()
 
 
-def get_token() -> str | None:
-    """Return the cached plaintext token if the session is still valid,
-    otherwise clear the session and return ``None``."""
-    if not SESSION_FILE.exists():
+def get_token(alias: str) -> str | None:
+    """Return the cached plaintext token for *alias* if the session is still
+    valid, otherwise clear the session and return ``None``."""
+    f = _account_session_file(alias)
+    if not f.exists():
         return None
     try:
-        ts = float(SESSION_FILE.read_text().strip())
+        ts = float(f.read_text().strip())
     except (ValueError, OSError):
-        _clear_session()
+        _clear_session(alias)
         return None
 
     if time.time() - ts > SESSION_TIMEOUT_SECONDS:
-        _clear_session()
+        _clear_session(alias)
         return None
 
-    token = keyring.get_password(KEYRING_SERVICE_SESSION, KEYRING_USERNAME)
+    token = keyring.get_password(KEYRING_SERVICE_SESSION, alias)
     if token is None:
-        _clear_session()
+        _clear_session(alias)
         return None
 
     # Refresh the timestamp on each successful access
-    _touch_session()
+    _touch_session(alias)
     return token
 
 
-def lock() -> None:
-    """Explicitly lock the session."""
-    _clear_session()
+def lock(alias: str) -> None:
+    """Explicitly lock the session for *alias*."""
+    _session_passwords.pop(alias, None)
+    _clear_session(alias)
 
 
-def logout() -> None:
-    """Remove all stored credentials."""
-    _clear_session()
+def logout(alias: str) -> None:
+    """Remove all stored credentials for *alias*."""
+    _session_passwords.pop(alias, None)
+    _clear_session(alias)
     try:
-        keyring.delete_password(KEYRING_SERVICE_ENCRYPTED, KEYRING_USERNAME)
+        keyring.delete_password(KEYRING_SERVICE_ENCRYPTED, alias)
     except keyring.errors.PasswordDeleteError:
         pass

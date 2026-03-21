@@ -7,6 +7,7 @@ from dnsctl.core.cloudflare_client import CloudflareClient, CloudflareAPIError
 from dnsctl.core.diff_engine import DiffResult, compute_diff, is_protected
 from dnsctl.core.git_manager import GitManager
 from dnsctl.core.state_manager import load_protected_records, load_zone, save_zone
+from dnsctl.config import ACCOUNTS_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,7 @@ class ApplyResult:
 
     succeeded: list[PlanAction] = field(default_factory=list)
     failed: list[tuple[PlanAction, str]] = field(default_factory=list)
+    sync_failed: bool = False  # True if post-apply re-sync failed; local state may be stale
 
     @property
     def all_succeeded(self) -> bool:
@@ -78,9 +80,10 @@ class ApplyResult:
 class SyncEngine:
     """Orchestrates drift detection, plan generation, and plan application."""
 
-    def __init__(self) -> None:
+    def __init__(self, alias: str) -> None:
+        self._alias = alias
         self._cf = CloudflareClient()
-        self._git = GitManager()
+        self._git = GitManager(ACCOUNTS_DIR / alias)
 
     # ------------------------------------------------------------------
     # Drift detection
@@ -92,7 +95,7 @@ class SyncEngine:
         Returns a ``DiffResult`` describing what changed on Cloudflare
         since the last sync, or ``None`` if the zone hasn't been synced.
         """
-        local_state = load_zone(zone_name)
+        local_state = load_zone(zone_name, self._alias)
         if local_state is None:
             return None
 
@@ -114,7 +117,7 @@ class SyncEngine:
         produces a list of actions to apply **to Cloudflare** so that
         remote matches local.
         """
-        local_state = load_zone(zone_name)
+        local_state = load_zone(zone_name, self._alias)
         if local_state is None:
             raise ValueError(f"Zone '{zone_name}' not synced. Run sync first.")
 
@@ -219,7 +222,7 @@ class SyncEngine:
         # Re-sync: fetch fresh remote state and save locally
         try:
             remote_records = self._cf.list_records(token, plan.zone_id)
-            save_zone(plan.zone_id, plan.zone_name, remote_records)
+            save_zone(plan.zone_id, plan.zone_name, remote_records, self._alias)
 
             self._git.auto_init()
             self._git.commit(
@@ -227,5 +230,6 @@ class SyncEngine:
             )
         except Exception as exc:
             logger.error("Post-apply sync failed: %s", exc)
+            result.sync_failed = True
 
         return result

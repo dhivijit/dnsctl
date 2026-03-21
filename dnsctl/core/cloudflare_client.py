@@ -244,7 +244,7 @@ def _normalize_record(raw: dict) -> dict:
         "id": raw["id"],
         "type": raw["type"],
         "name": raw["name"],
-        "content": raw["content"],
+        "content": raw.get("content", ""),
         "ttl": raw.get("ttl", 1),
         "proxied": raw.get("proxied", False),
     }

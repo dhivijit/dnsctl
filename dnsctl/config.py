@@ -7,7 +7,12 @@ from pathlib import Path
 # Runtime state directory  (~/.dnsctl/)
 # ---------------------------------------------------------------------------
 STATE_DIR = Path(os.environ.get("DNSCTL_STATE_DIR", Path.home() / ".dnsctl"))
-ZONES_DIR = STATE_DIR / "zones"
+ACCOUNTS_DIR = STATE_DIR / "accounts"
+ACCOUNTS_FILE = STATE_DIR / "accounts.json"
+# Legacy single-account zone dir — used only during migration
+_LEGACY_ZONES_DIR = STATE_DIR / "zones"
+# Kept for backward-compatibility with tests that import ZONES_DIR directly
+ZONES_DIR = _LEGACY_ZONES_DIR
 LOGS_DIR = STATE_DIR / "logs"
 LOG_FILE = LOGS_DIR / "dnsctl.log"
 METADATA_FILE = STATE_DIR / "metadata.json"

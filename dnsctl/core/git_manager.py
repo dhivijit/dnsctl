@@ -25,10 +25,12 @@ class GitManager:
         """Open or create the git repository.  Idempotent."""
         try:
             self._repo = Repo(self._dir)
-        except (InvalidGitRepositoryError, Exception):
+        except InvalidGitRepositoryError:
             self._repo = Repo.init(self._dir)
-            # Perform an initial commit so HEAD exists
-            self._repo.index.add([".gitignore"])
+            # Perform an initial commit so HEAD exists — only stage files that exist
+            gitignore = self._dir / ".gitignore"
+            if gitignore.exists():
+                self._repo.index.add([".gitignore"])
             author = Actor(GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL)
             self._repo.index.commit(
                 "Initial dnsctl state", author=author, committer=author

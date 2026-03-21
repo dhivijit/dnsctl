@@ -18,21 +18,22 @@ from dnsctl.core.cloudflare_client import CloudflareClient, CloudflareAPIError
 @pytest.fixture
 def tmp_state(tmp_path):
     """Patch all state directory paths to a temp dir for isolation."""
-    zones = tmp_path / "zones"
+    accounts_dir = tmp_path / "accounts"
+    accounts_file = tmp_path / "accounts.json"
     logs = tmp_path / "logs"
     metadata = tmp_path / "metadata.json"
     config = tmp_path / "config.json"
-    gitignore = tmp_path / ".gitignore"
 
-    patches = {
-        "STATE_DIR": tmp_path,
-        "ZONES_DIR": zones,
-        "LOGS_DIR": logs,
-        "METADATA_FILE": metadata,
-        "CONFIG_FILE": config,
-        "GITIGNORE_FILE": gitignore,
-    }
-    with patch.multiple("dnsctl.core.state_manager", **patches):
+    with patch.multiple(
+        "dnsctl.core.state_manager",
+        STATE_DIR=tmp_path,
+        ACCOUNTS_DIR=accounts_dir,
+        ACCOUNTS_FILE=accounts_file,
+        LOGS_DIR=logs,
+        METADATA_FILE=metadata,
+        CONFIG_FILE=config,
+        _LEGACY_ZONES_DIR=tmp_path / "zones",
+    ):
         yield tmp_path
 
 
@@ -42,12 +43,14 @@ def tmp_state(tmp_path):
 
 class TestProtectedRecords:
     def test_load_empty(self, tmp_state):
-        state_manager.init_state_dir()
+        with patch("dnsctl.core.state_manager._migrate_legacy"):
+            state_manager.init_state_dir()
         protected = state_manager.load_protected_records()
         assert protected == []
 
     def test_add_protected_record(self, tmp_state):
-        state_manager.init_state_dir()
+        with patch("dnsctl.core.state_manager._migrate_legacy"):
+            state_manager.init_state_dir()
         result = state_manager.add_protected_record("A", "example.com", "Production")
         assert len(result) == 1
         assert result[0]["type"] == "A"
@@ -55,13 +58,15 @@ class TestProtectedRecords:
         assert result[0]["reason"] == "Production"
 
     def test_add_duplicate_is_noop(self, tmp_state):
-        state_manager.init_state_dir()
+        with patch("dnsctl.core.state_manager._migrate_legacy"):
+            state_manager.init_state_dir()
         state_manager.add_protected_record("A", "example.com", "Prod")
         result = state_manager.add_protected_record("A", "example.com", "Different reason")
         assert len(result) == 1  # still just one
 
     def test_remove_protected_record(self, tmp_state):
-        state_manager.init_state_dir()
+        with patch("dnsctl.core.state_manager._migrate_legacy"):
+            state_manager.init_state_dir()
         state_manager.add_protected_record("A", "example.com", "Prod")
         state_manager.add_protected_record("MX", "example.com", "Mail")
         result = state_manager.remove_protected_record("A", "example.com")
@@ -69,13 +74,15 @@ class TestProtectedRecords:
         assert result[0]["type"] == "MX"
 
     def test_remove_nonexistent_is_noop(self, tmp_state):
-        state_manager.init_state_dir()
+        with patch("dnsctl.core.state_manager._migrate_legacy"):
+            state_manager.init_state_dir()
         state_manager.add_protected_record("A", "example.com", "Prod")
         result = state_manager.remove_protected_record("CNAME", "www.example.com")
         assert len(result) == 1  # unchanged
 
     def test_persistence(self, tmp_state):
-        state_manager.init_state_dir()
+        with patch("dnsctl.core.state_manager._migrate_legacy"):
+            state_manager.init_state_dir()
         state_manager.add_protected_record("A", "example.com", "Prod")
         # Re-read from disk
         loaded = state_manager.load_protected_records()
@@ -83,12 +90,14 @@ class TestProtectedRecords:
         assert loaded[0]["type"] == "A"
 
     def test_load_corrupted_metadata_returns_empty(self, tmp_state):
-        state_manager.init_state_dir()
+        with patch("dnsctl.core.state_manager._migrate_legacy"):
+            state_manager.init_state_dir()
         (tmp_state / "metadata.json").write_text("not json {{{")
         assert state_manager.load_protected_records() == []
 
     def test_metadata_preserves_other_fields(self, tmp_state):
-        state_manager.init_state_dir()
+        with patch("dnsctl.core.state_manager._migrate_legacy"):
+            state_manager.init_state_dir()
         # Add a custom field to metadata
         meta = json.loads((tmp_state / "metadata.json").read_text())
         meta["custom_field"] = "preserved"

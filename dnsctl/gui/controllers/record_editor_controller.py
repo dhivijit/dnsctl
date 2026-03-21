@@ -146,10 +146,26 @@ class RecordEditorController:
         name = d.nameEdit.text().strip()
         content = d.contentEdit.text().strip()
 
-        # Auto-append zone name if bare subdomain given
-        if name and not name.endswith(self._zone_name):
-            if "." not in name or not name.endswith("."):
+        # Auto-append zone name if name is not already a full hostname for this zone.
+        # If the name contains dots but doesn't end with the zone (looks like an external
+        # FQDN), warn the user rather than silently appending.
+        if name and not name.endswith(self._zone_name) and not name.endswith("."):
+            if "." not in name:
                 name = f"{name}.{self._zone_name}"
+            else:
+                from PyQt6.QtWidgets import QMessageBox
+                proposed = f"{name}.{self._zone_name}"
+                answer = QMessageBox.question(
+                    d,
+                    "Confirm Record Name",
+                    f"'{name}' doesn't end with the zone '{self._zone_name}'.\n\n"
+                    f"Append the zone to make it '{proposed}'?\n\n"
+                    f"Choose 'No' to keep '{name}' as-is.",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.Yes,
+                )
+                if answer == QMessageBox.StandardButton.Yes:
+                    name = proposed
 
         record: dict = {
             "type": rtype,

@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem,
 )
 
+from dnsctl.config import ACCOUNTS_DIR
 from dnsctl.core.git_manager import GitManager
 from dnsctl.core.state_manager import list_synced_zones
 
@@ -21,9 +22,10 @@ logger = logging.getLogger(__name__)
 class HistoryController:
     """Drives the history_dialog.ui — commit list, preview, rollback."""
 
-    def __init__(self, dialog: QDialog) -> None:
+    def __init__(self, dialog: QDialog, alias: str = "default") -> None:
         self._dialog = dialog
-        self._git = GitManager()
+        self._alias = alias
+        self._git = GitManager(ACCOUNTS_DIR / alias)
         self._commits: list[dict] = []
         self.rolled_back = False  # True if a rollback was performed
 
@@ -106,7 +108,7 @@ class HistoryController:
             return
 
         # Build an HTML preview of zone files at this commit
-        zones = list_synced_zones()
+        zones = list_synced_zones(self._alias)
         html_parts = [f"<h3>Commit {commit['short_sha']}</h3>"]
         html_parts.append(f"<p><b>{commit['message']}</b><br>{commit['date'][:19]}</p>")
 
@@ -179,7 +181,7 @@ class HistoryController:
         if commit is None:
             return
 
-        zones = list_synced_zones()
+        zones = list_synced_zones(self._alias)
         if not zones:
             QMessageBox.warning(self._dialog, "Export", "No zones synced.")
             return

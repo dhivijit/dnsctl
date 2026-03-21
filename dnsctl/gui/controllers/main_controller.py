@@ -7,7 +7,7 @@ from PyQt6.QtCore import QTimer, QThread, pyqtSignal, Qt
 from PyQt6.QtGui import QCursor
 from PyQt6.QtWidgets import QApplication, QMainWindow, QMessageBox, QProgressBar
 
-from dnsctl.config import SESSION_TIMEOUT_SECONDS
+from dnsctl.config import ACCOUNTS_DIR, SESSION_TIMEOUT_SECONDS
 from dnsctl.core.cloudflare_client import CloudflareClient, CloudflareAPIError
 from dnsctl.core.git_manager import GitManager
 from dnsctl.core.security import get_token, lock
@@ -19,6 +19,9 @@ from dnsctl.core.state_manager import (
     save_zone,
     set_config,
     get_config,
+    list_accounts,
+    get_current_account,
+    set_current_account,
     add_protected_record,
     remove_protected_record,
 )
@@ -32,16 +35,36 @@ from dnsctl.gui import icons as _icons
 logger = logging.getLogger(__name__)
 
 
+class _DriftWorker(QThread):
+    """Background worker that detects drift without blocking the UI."""
+
+    finished = pyqtSignal(object)  # DiffResult | None
+
+    def __init__(self, engine, zone_name: str, token: str) -> None:
+        super().__init__()
+        self._engine = engine
+        self._zone_name = zone_name
+        self._token = token
+
+    def run(self) -> None:
+        try:
+            drift = self._engine.detect_drift(self._zone_name, self._token)
+            self.finished.emit(drift)
+        except Exception:
+            self.finished.emit(None)
+
+
 class SyncWorker(QThread):
     """Background worker for syncing zones from Cloudflare."""
     
     finished = pyqtSignal(bool, str, int)  # success, message, zone_count
     
-    def __init__(self, token: str, cf: CloudflareClient, git: GitManager):
+    def __init__(self, token: str, cf: CloudflareClient, git: GitManager, alias: str):
         super().__init__()
         self._token = token
         self._cf = cf
         self._git = git
+        self._alias = alias
     
     def run(self):
         """Run the sync in a background thread."""
@@ -56,14 +79,15 @@ class SyncWorker(QThread):
 
             for z in zones:
                 records = self._cf.list_records(self._token, z["id"])
-                save_zone(z["id"], z["name"], records)
+                save_zone(z["id"], z["name"], records, self._alias)
 
             self._git.commit(f"Sync with remote ({len(zones)} zone(s))")
 
-            # Set default zone if not yet set
+            # Set default zone for this account if not yet set
             cfg = get_config()
-            if cfg.get("default_zone") is None:
-                set_config("default_zone", zones[0]["name"])
+            default_key = f"default_zone_{self._alias}"
+            if cfg.get(default_key) is None:
+                set_config(default_key, zones[0]["name"])
 
             self.finished.emit(True, f"Synced {len(zones)} zone(s)", len(zones))
         except CloudflareAPIError as exc:
@@ -75,17 +99,19 @@ class SyncWorker(QThread):
 class MainController:
     """Wires the main window widgets to core engine operations."""
 
-    def __init__(self, window: QMainWindow, token: str, theme_mode: str = "dark") -> None:
+    def __init__(self, window: QMainWindow, token: str, alias: str, theme_mode: str = "dark") -> None:
         self._window = window
         self._token = token
+        self._alias = alias
         self._theme_mode = theme_mode
         self._drift_state: str = "unknown"
         self._drift_text: str = "● …"
         self._cf = CloudflareClient()
-        self._git = GitManager()
-        self._engine = SyncEngine()
+        self._git = GitManager(ACCOUNTS_DIR / alias)
+        self._engine = SyncEngine(alias=alias)
         self._record_ctrl: RecordController | None = None
         self._sync_worker: SyncWorker | None = None
+        self._drift_worker: _DriftWorker | None = None
 
         # Session expiry timer — check every 60 seconds
         self._session_timer = QTimer()
@@ -112,6 +138,11 @@ class MainController:
         w.exportButton.clicked.connect(self._on_export)
         w.themeToggleButton.clicked.connect(self._on_toggle_theme)
 
+        # Account selector
+        w.accountComboBox.currentIndexChanged.connect(self._on_account_changed)
+        w.addAccountButton.clicked.connect(self._on_add_account)
+        w.removeAccountButton.clicked.connect(self._on_remove_account)
+
         # Zone selector
         w.zoneComboBox.currentIndexChanged.connect(self._on_zone_changed)
 
@@ -127,10 +158,9 @@ class MainController:
         # Double-click a record to open the editor
         self._record_ctrl.connect_double_click(self._on_edit_record)
 
-        # Load cached zones into combo box
+        # Load accounts then zones
+        self._populate_account_combo()
         self._populate_zone_combo()
-
-        # Load records for default/first zone
         self._load_current_zone()
 
         # Start session timer
@@ -152,6 +182,165 @@ class MainController:
 
 
     # ------------------------------------------------------------------
+    # Account combo population
+    # ------------------------------------------------------------------
+
+    def _populate_account_combo(self) -> None:
+        w = self._window
+        w.accountComboBox.blockSignals(True)
+        w.accountComboBox.clear()
+        for acct in list_accounts():
+            w.accountComboBox.addItem(acct["label"], acct["alias"])
+        # Select the current account
+        for i in range(w.accountComboBox.count()):
+            if w.accountComboBox.itemData(i) == self._alias:
+                w.accountComboBox.setCurrentIndex(i)
+                break
+        w.accountComboBox.blockSignals(False)
+        w.removeAccountButton.setEnabled(w.accountComboBox.count() > 1)
+
+    # ------------------------------------------------------------------
+    # Account switching
+    # ------------------------------------------------------------------
+
+    def _on_account_changed(self, index: int) -> None:
+        if index < 0:
+            return
+        new_alias = self._window.accountComboBox.itemData(index)
+        if not new_alias or new_alias == self._alias:
+            return
+
+        # Try to get an active session token for the new account
+        token = get_token(new_alias)
+        if token is None:
+            # Need to unlock (or re-login)
+            from dnsctl.core.security import is_logged_in
+            from dnsctl.gui.app import _show_unlock_dialog, _show_login_dialog, _FORGOT_PASSWORD
+            accounts = list_accounts()
+            label = next((a["label"] for a in accounts if a["alias"] == new_alias), new_alias)
+            if is_logged_in(new_alias):
+                token = _show_unlock_dialog(QApplication.instance(), alias=new_alias, label=label)
+                if token == _FORGOT_PASSWORD:
+                    # All accounts wiped — close the main window; startup will handle fresh login
+                    self._session_timer.stop()
+                    self._window.close()
+                    return
+            else:
+                _show_login_dialog(QApplication.instance(), alias=new_alias)
+                token = get_token(new_alias)
+
+            if not token:
+                # User cancelled — revert combo to previous account
+                self._populate_account_combo()
+                return
+
+        # Switch to the new account
+        self._alias = new_alias
+        self._token = token
+        self._git = GitManager(ACCOUNTS_DIR / new_alias)
+        self._engine = SyncEngine(alias=new_alias)
+        set_current_account(new_alias)
+        self._populate_zone_combo()
+        self._load_current_zone()
+        self._set_drift_badge("unknown", "● …")
+        self._window.statusbar.showMessage(f"Switched to account ‘{new_alias}\u2019 — Syncing…")
+        QTimer.singleShot(100, self._on_sync)
+
+    # ------------------------------------------------------------------
+    # Add account
+    # ------------------------------------------------------------------
+
+    def _on_add_account(self) -> None:
+        from dnsctl.gui.app import _show_login_dialog
+        from dnsctl.core.security import get_cached_password
+        existing_aliases = {a["alias"] for a in list_accounts()}
+        cached_pw = get_cached_password(self._alias)
+        _show_login_dialog(QApplication.instance(), reuse_password=cached_pw)
+        # Detect which alias was just added
+        new_aliases = {a["alias"] for a in list_accounts()} - existing_aliases
+        if not new_aliases:
+            return  # user cancelled
+        new_alias = next(iter(new_aliases))
+        token = get_token(new_alias)
+        if not token:
+            return
+        # Switch to the newly added account
+        self._alias = new_alias
+        self._token = token
+        self._git = GitManager(ACCOUNTS_DIR / new_alias)
+        self._engine = SyncEngine(alias=new_alias)
+        set_current_account(new_alias)
+        self._populate_account_combo()
+        self._populate_zone_combo()
+        self._load_current_zone()
+        self._set_drift_badge("unknown", "● …")
+        self._window.statusbar.showMessage("New account added — Syncing…")
+        QTimer.singleShot(100, self._on_sync)
+
+    # ------------------------------------------------------------------
+    # Account context menu (right-click) — Remove Account
+    # ------------------------------------------------------------------
+
+    def _on_remove_account(self) -> None:
+        from dnsctl.core.security import logout as sec_logout
+        from dnsctl.core.state_manager import remove_account
+
+        accounts = list_accounts()
+        if len(accounts) <= 1:
+            QMessageBox.information(
+                self._window, "Remove Account",
+                "Cannot remove the last account."
+            )
+            return
+
+        label = next((a["label"] for a in accounts if a["alias"] == self._alias), self._alias)
+        answer = QMessageBox.warning(
+            self._window, "Remove Account",
+            f"Remove account \u2018{label}\u2019?\n\n"
+            "All local zone data for this account will be deleted.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        self._session_timer.stop()
+        old_alias = self._alias
+        sec_logout(old_alias)
+        remove_account(old_alias)
+
+        # Switch to the first remaining account
+        remaining = list_accounts()
+        new_alias = remaining[0]["alias"]
+        token = get_token(new_alias)
+        if not token:
+            from dnsctl.core.security import is_logged_in
+            from dnsctl.gui.app import _show_unlock_dialog, _show_login_dialog, _FORGOT_PASSWORD
+            new_label = remaining[0]["label"]
+            if is_logged_in(new_alias):
+                token = _show_unlock_dialog(QApplication.instance(), alias=new_alias, label=new_label)
+                if token == _FORGOT_PASSWORD:
+                    # All accounts wiped — nothing left to switch to
+                    self._window.close()
+                    return
+            if not token:
+                _show_login_dialog(QApplication.instance(), alias=new_alias)
+                token = get_token(new_alias)
+
+        self._alias = new_alias
+        self._token = token or ""
+        self._git = GitManager(ACCOUNTS_DIR / new_alias)
+        self._engine = SyncEngine(alias=new_alias)
+        set_current_account(new_alias)
+        self._populate_account_combo()
+        self._populate_zone_combo()
+        self._load_current_zone()
+        self._set_drift_badge("unknown", "● …")
+        self._window.statusbar.showMessage(f"Removed account \u2018{old_alias}\u2019 — Syncing…")
+        QTimer.singleShot(100, self._on_sync)
+
+
+    # ------------------------------------------------------------------
     # Zone combo population
     # ------------------------------------------------------------------
 
@@ -160,13 +349,13 @@ class MainController:
         w.zoneComboBox.blockSignals(True)
         w.zoneComboBox.clear()
 
-        synced = list_synced_zones()
+        synced = list_synced_zones(self._alias)
         for name in synced:
             w.zoneComboBox.addItem(name)
 
-        # Select default zone if configured
+        # Select default zone for this account
         cfg = get_config()
-        default = cfg.get("default_zone")
+        default = cfg.get(f"default_zone_{self._alias}")
         if default and default in synced:
             w.zoneComboBox.setCurrentText(default)
 
@@ -185,7 +374,7 @@ class MainController:
         zone_name = self._window.zoneComboBox.currentText()
         if not zone_name:
             return
-        state = load_zone(zone_name)
+        state = load_zone(zone_name, self._alias)
         if state and self._record_ctrl:
             self._record_ctrl.populate(state.get("records", []))
             ts = state.get("last_synced_at", "never")
@@ -213,7 +402,7 @@ class MainController:
         QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
 
         # Start background sync
-        self._sync_worker = SyncWorker(token, self._cf, self._git)
+        self._sync_worker = SyncWorker(token, self._cf, self._git, self._alias)
         self._sync_worker.finished.connect(self._on_sync_finished)
         self._sync_worker.start()
 
@@ -256,7 +445,7 @@ class MainController:
             QMessageBox.warning(self._window, "No Zone",
                                 "No zone selected. Sync first.")
             return None
-        state = load_zone(zone_name)
+        state = load_zone(zone_name, self._alias)
         if state is None:
             QMessageBox.warning(self._window, "No Zone",
                                 "Zone not synced. Sync first.")
@@ -327,7 +516,7 @@ class MainController:
             return
         zone_name, zone_id = info
         records = self._record_ctrl.records
-        save_zone(zone_id, zone_name, records)
+        save_zone(zone_id, zone_name, records, self._alias)
         self._git.auto_init()
         self._git.commit(f"Local record edit in {zone_name}")
         self._set_drift_badge("local", "● Local changes")
@@ -372,7 +561,7 @@ class MainController:
         from PyQt6 import uic
         dialog = uic.loadUi(
             str(Path(__file__).parent.parent / "ui" / "plan_dialog.ui"))
-        ctrl = PlanController(dialog, zone_name, token)
+        ctrl = PlanController(dialog, zone_name, token, alias=self._alias)
         ctrl.setup()
         dialog.exec()
 
@@ -382,17 +571,21 @@ class MainController:
         self._update_drift_badge(zone_name, token)
 
     def _update_drift_badge(self, zone_name: str, token: str) -> None:
-        """Check drift and update the toolbar badge."""
-        try:
-            drift = self._engine.detect_drift(zone_name, token)
-            if drift is None:
-                self._set_drift_badge("unknown", "● Unknown")
-            elif drift.has_changes:
-                self._set_drift_badge("drift", f"● Drift ({drift.summary})")
-            else:
-                self._set_drift_badge("clean", "● Clean")
-        except Exception:
-            pass  # don't break UI on drift-check failure
+        """Check drift in a background thread and update the toolbar badge."""
+        if self._drift_worker is not None and self._drift_worker.isRunning():
+            return
+        self._set_drift_badge("unknown", "● …")
+        self._drift_worker = _DriftWorker(self._engine, zone_name, token)
+        self._drift_worker.finished.connect(self._on_drift_result)
+        self._drift_worker.start()
+
+    def _on_drift_result(self, drift) -> None:
+        if drift is None:
+            self._set_drift_badge("unknown", "● Unknown")
+        elif drift.has_changes:
+            self._set_drift_badge("drift", f"● Drift ({drift.summary})")
+        else:
+            self._set_drift_badge("clean", "● Clean")
 
     # ------------------------------------------------------------------
     # History / Rollback
@@ -403,7 +596,7 @@ class MainController:
         from PyQt6 import uic
         dialog = uic.loadUi(
             str(Path(__file__).parent.parent / "ui" / "history_dialog.ui"))
-        ctrl = HistoryController(dialog)
+        ctrl = HistoryController(dialog, alias=self._alias)
         ctrl.setup()
         dialog.exec()
 
@@ -439,7 +632,7 @@ class MainController:
             return
 
         try:
-            export_zone(zone_name, Path(dest))
+            export_zone(zone_name, Path(dest), self._alias)
             self._window.statusbar.showMessage(
                 f"Exported {zone_name} \u2192 {dest}")
         except FileNotFoundError as exc:
@@ -461,7 +654,7 @@ class MainController:
             return
 
         try:
-            state = import_zone(Path(path))
+            state = import_zone(Path(path), self._alias)
             zone_name = state["zone_name"]
             n = len(state.get("records", []))
             self._git.auto_init()
@@ -509,6 +702,7 @@ class MainController:
             w.syncButton, w.planButton, w.historyButton, w.lockButton,
             w.themeToggleButton, w.addRecordButton, w.editRecordButton,
             w.deleteRecordButton, w.importButton, w.exportButton,
+            w.addAccountButton, w.removeAccountButton,
         ):
             install_hover_animation(btn, color=accent)
 
@@ -547,7 +741,8 @@ class MainController:
     # ------------------------------------------------------------------
 
     def _on_lock(self) -> None:
-        lock()
+        self._session_timer.stop()
+        lock(self._alias)
         self._token = ""
         QMessageBox.information(
             self._window, "Locked", "Session locked.  Restart the application to unlock.")
@@ -558,18 +753,19 @@ class MainController:
     # ------------------------------------------------------------------
 
     def _check_session(self) -> None:
-        if get_token() is None:
+        if get_token(self._alias) is None:
             self._session_timer.stop()
-            QMessageBox.warning(
-                self._window,
-                "Session Expired",
-                "Your session has expired.  Restart the application to unlock.",
-            )
-            self._window.close()
+            if self._window.isVisible():
+                QMessageBox.warning(
+                    self._window,
+                    "Session Expired",
+                    "Your session has expired.  Restart the application to unlock.",
+                )
+                self._window.close()
 
     def _ensure_token(self) -> str | None:
         """Return the current token if the session is valid, else show a warning."""
-        token = get_token()
+        token = get_token(self._alias)
         if token is None:
             QMessageBox.warning(
                 self._window,
