@@ -184,6 +184,23 @@ def get_token(alias: str) -> str | None:
     return token
 
 
+def unlock_all(password: str, aliases: list[str]) -> list[str]:
+    """Unlock every alias in *aliases* using *password*.
+
+    Silently skips any account where the password doesn't work (e.g. a
+    different password was used when that account was created).  Returns
+    the list of aliases that were successfully unlocked.
+    """
+    succeeded: list[str] = []
+    for alias in aliases:
+        try:
+            unlock(password, alias)
+            succeeded.append(alias)
+        except Exception:
+            pass
+    return succeeded
+
+
 def lock(alias: str) -> None:
     """Explicitly lock the session for *alias*."""
     _session_passwords.pop(alias, None)

@@ -179,6 +179,13 @@ def unlock_cmd(account: str | None) -> None:
         click.echo("Wrong password or corrupted token.", err=True)
         raise SystemExit(1)
     click.echo(f"Session unlocked for account \u2018{alias}\u2019.")
+    # Unlock all other accounts with the same password
+    from dnsctl.core.security import unlock_all
+    other_aliases = [a["alias"] for a in list_accounts() if a["alias"] != alias]
+    unlocked = unlock_all(password, other_aliases)
+    if unlocked:
+        names = ", ".join(f"\u2018{a}\u2019" for a in unlocked)
+        click.echo(f"Also unlocked: {names}")
 
 
 
@@ -824,7 +831,11 @@ def accounts_remove_cmd(alias: str) -> None:
 # ======================================================================
 
 def main() -> None:
-    """Entry point wrapper — catches Ctrl+C for a clean exit."""
+    """Entry point wrapper — no args opens TUI, otherwise delegates to CLI."""
+    if len(sys.argv) == 1:
+        from dnsctl.tui.app import run_tui
+        run_tui()
+        return
     try:
         cli(standalone_mode=True)
     except KeyboardInterrupt:

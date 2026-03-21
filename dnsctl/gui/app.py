@@ -289,6 +289,13 @@ def _show_unlock_dialog(app: QApplication, alias: str = "default", label: str = 
             return
         try:
             result["token"] = unlock(password, alias)
+            # Unlock all other accounts with the same password
+            from dnsctl.core.security import unlock_all
+            other_aliases = [
+                a["alias"] for a in list_accounts() if a["alias"] != alias
+            ]
+            if other_aliases:
+                unlock_all(password, other_aliases)
             dialog.accept()
         except Exception:
             dialog.errorLabel.setText("Wrong password.")

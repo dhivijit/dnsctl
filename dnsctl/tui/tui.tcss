@@ -1,0 +1,126 @@
+/* =========================================================
+   dnsctl TUI — Textual CSS
+   ========================================================= */
+
+/* --- Auth screens ---------------------------------------- */
+
+#auth-container {
+    align: center middle;
+    height: 1fr;
+}
+
+#auth-form {
+    width: 64;
+    height: auto;
+    border: round $accent;
+    padding: 1 2;
+    background: $panel;
+}
+
+#auth-header {
+    text-align: center;
+    margin-bottom: 1;
+    color: $accent;
+    text-style: bold;
+}
+
+#auth-form Label {
+    margin-top: 1;
+    color: $text-muted;
+}
+
+#auth-form Input {
+    margin-bottom: 0;
+}
+
+#auth-buttons {
+    align: center middle;
+    margin-top: 1;
+    height: auto;
+}
+
+#auth-buttons Button {
+    margin: 0 1;
+}
+
+.forgot-btn {
+    margin-top: 1;
+    width: 100%;
+}
+
+#confirm-forgot-btn {
+    margin-top: 0;
+    width: 100%;
+}
+
+.hidden {
+    display: none;
+}
+
+/* --- Status / info bars ---------------------------------- */
+
+#account-bar,
+#records-zone-bar,
+#plan-zone-bar,
+#accounts-bar {
+    background: $accent;
+    color: $text;
+    padding: 0 2;
+    height: 1;
+    text-style: bold;
+}
+
+/* --- Labels ---------------------------------------------- */
+
+.error {
+    color: $error;
+    height: 1;
+}
+
+.muted {
+    color: $text-muted;
+    height: 1;
+}
+
+.warning {
+    color: $warning;
+}
+
+#records-status,
+#plan-status,
+#accounts-status,
+#status-label {
+    padding: 0 1;
+    color: $text-muted;
+    height: 1;
+}
+
+/* --- Filter input ---------------------------------------- */
+
+#filter-input {
+    margin: 0;
+    border: none;
+    border-bottom: solid $accent;
+}
+
+/* --- Tables ---------------------------------------------- */
+
+DataTable {
+    height: 1fr;
+}
+
+/* --- Plan buttons ---------------------------------------- */
+
+#plan-buttons {
+    height: auto;
+    padding: 1 1 0 1;
+}
+
+#plan-buttons Button {
+    margin-right: 1;
+}
+
+#apply-status {
+    padding: 0 1;
+    height: 1;
+}
