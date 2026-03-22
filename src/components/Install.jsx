@@ -8,6 +8,7 @@ const INSTALL_STEPS = [
   { label: 'Add your Cloudflare token', cmd: 'dnsctl login --alias personal' },
   { label: 'Sync your DNS records', cmd: 'dnsctl sync' },
   { label: 'Preview changes', cmd: 'dnsctl plan' },
+  { label: 'Want to use the GUI ?', cmd: 'dnsctl-g' },
 ]
 
 function CodeBlock({ cmd, label }) {
