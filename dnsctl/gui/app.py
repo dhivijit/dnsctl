@@ -66,7 +66,7 @@ def _set_platform_icon():
             # On Windows, we need to set the AppUserModelID to prevent
             # the app from being grouped with python.exe in the taskbar
             import ctypes
-            myappid = 'dhivijit.dnsctl.gui.1.1.0'  # arbitrary string
+            myappid = 'dhivijit.dnsctl.gui.1.1.1'  # arbitrary string
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
         except Exception:
             pass  # Failed to set, continue anyway
@@ -289,6 +289,10 @@ def _show_unlock_dialog(app: QApplication, alias: str = "default", label: str = 
             return
         try:
             result["token"] = unlock(password, alias)
+            from dnsctl.core.security import unlock_all
+            from dnsctl.core.state_manager import list_accounts as _list_accts
+            other_aliases = [a["alias"] for a in _list_accts() if a["alias"] != alias]
+            unlock_all(password, other_aliases)
             dialog.accept()
         except Exception:
             dialog.errorLabel.setText("Wrong password.")

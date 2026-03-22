@@ -179,8 +179,12 @@ def unlock_cmd(account: str | None) -> None:
         click.echo("Wrong password or corrupted token.", err=True)
         raise SystemExit(1)
     click.echo(f"Session unlocked for account \u2018{alias}\u2019.")
-
-
+    from dnsctl.core.security import unlock_all
+    other_aliases = [a["alias"] for a in list_accounts() if a["alias"] != alias]
+    unlocked = unlock_all(password, other_aliases)
+    if unlocked:
+        names = ", ".join(f"\u2018{a}\u2019" for a in unlocked)
+        click.echo(f"Also unlocked: {names}")
 
 
 
