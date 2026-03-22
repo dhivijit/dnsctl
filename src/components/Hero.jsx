@@ -175,7 +175,7 @@ export default function Hero() {
         style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', justifyContent: 'center', marginBottom: '4rem' }}
       >
         <a
-          href="https://github.com/dhivijit/dnsctl"
+          href="https://l.dhivijit.dev/dnsctl"
           target="_blank"
           rel="noopener noreferrer"
           style={{

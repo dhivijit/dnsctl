@@ -47,7 +47,7 @@ export default function Navbar() {
       </div>
 
       <a
-        href="https://github.com/dhivijit/dnsctl"
+        href="https://l.dhivijit.dev/dnsctl"
         target="_blank"
         rel="noopener noreferrer"
         style={{

@@ -59,7 +59,7 @@ export default function Footer() {
         </p>
 
         <a
-          href="https://github.com/dhivijit/dnsctl"
+          href="https://l.dhivijit.dev/dnsctl"
           target="_blank"
           rel="noopener noreferrer"
           style={{
@@ -115,11 +115,11 @@ export default function Footer() {
             onMouseEnter={e => e.currentTarget.style.color = 'var(--cyan)'}
             onMouseLeave={e => e.currentTarget.style.color = 'var(--text)'}
           >
-            dhivijit
+            Dhivijit Koppuravuri
           </a>
         </p>
         <a
-          href="https://github.com/dhivijit/dnsctl"
+          href="https://l.dhivijit.dev/dnsctl"
           target="_blank"
           rel="noopener noreferrer"
           style={{
