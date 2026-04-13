@@ -4,6 +4,12 @@ import json
 import logging
 from pathlib import Path
 
+from dnsctl.config import LOG_FILE
+
+
+def _log_path() -> str:
+    return str(LOG_FILE)
+
 from PyQt6.QtWidgets import (
     QDialog,
     QFileDialog,
@@ -73,10 +79,15 @@ class HistoryController:
         table = self._dialog.historyTable
         table.setRowCount(len(self._commits))
 
+        head_sha = self._git.repo.head.commit.hexsha if self._commits else None
+
         for row, entry in enumerate(self._commits):
-            table.setItem(row, 0, QTableWidgetItem(entry["short_sha"]))
+            is_head = entry["sha"] == head_sha
+            sha_text = entry["short_sha"] + (" [HEAD]" if is_head else "")
+            msg_text = entry["message"] + (" ← current" if is_head else "")
+            table.setItem(row, 0, QTableWidgetItem(sha_text))
             table.setItem(row, 1, QTableWidgetItem(entry["date"][:19].replace("T", " ")))
-            table.setItem(row, 2, QTableWidgetItem(entry["message"]))
+            table.setItem(row, 2, QTableWidgetItem(msg_text))
 
         # Stretch the message column
         header = table.horizontalHeader()
@@ -143,6 +154,16 @@ class HistoryController:
         if commit is None:
             return
 
+        # Guard: rolling back to the current HEAD is a no-op
+        if commit["sha"] == self._git.repo.head.commit.hexsha:
+            QMessageBox.information(
+                self._dialog,
+                "Already at this commit",
+                f"Commit {commit['short_sha']} is the current state — there is nothing to roll back.\n\n"
+                "Select an older commit from the list to restore an earlier state.",
+            )
+            return
+
         answer = QMessageBox.warning(
             self._dialog,
             "Confirm Rollback",
@@ -158,19 +179,37 @@ class HistoryController:
 
         try:
             new_sha = self._git.rollback(commit["sha"])
-            self.rolled_back = True
+        except Exception as exc:
+            logger.exception("Rollback failed for commit %s", commit["short_sha"])
+            QMessageBox.critical(
+                self._dialog,
+                "Rollback Failed",
+                f"{exc}\n\nCheck the log file for details:\n{_log_path()}",
+            )
+            return
+
+        if new_sha == commit["sha"]:
+            # rollback() returned the target SHA — already at that state
             QMessageBox.information(
                 self._dialog,
-                "Rollback Complete",
-                f"Rolled back to {commit['short_sha']}.\n"
-                f"New commit: {new_sha[:8]}\n\n"
-                "Review with Plan, then Apply to update Cloudflare.",
+                "Nothing to Roll Back",
+                f"Local state is already identical to commit {commit['short_sha']}.\n"
+                "No new commit was needed.",
             )
-            # Refresh the history list
-            self._commits = self._git.log(max_count=100)
-            self._populate_table()
-        except ValueError as exc:
-            QMessageBox.critical(self._dialog, "Rollback Failed", str(exc))
+            return
+
+        self.rolled_back = True
+        logger.info("GUI rollback: new commit %s", new_sha[:8])
+        QMessageBox.information(
+            self._dialog,
+            "Rollback Complete",
+            f"Rolled back to {commit['short_sha']}.\n"
+            f"New commit: {new_sha[:8]}\n\n"
+            "Review with Plan, then Apply to update Cloudflare.",
+        )
+        # Refresh the history list
+        self._commits = self._git.log(max_count=100)
+        self._populate_table()
 
     # ------------------------------------------------------------------
     # Export selected commit's state

@@ -1,0 +1,294 @@
+/* =========================================================
+   dnsctl TUI — Textual CSS
+   ========================================================= */
+
+/* --- Auth screens ---------------------------------------- */
+
+#auth-container {
+    align: center middle;
+    height: 1fr;
+}
+
+#auth-form {
+    width: 64;
+    height: auto;
+    border: round $accent;
+    padding: 1 2;
+    background: $panel;
+}
+
+#auth-header {
+    text-align: center;
+    margin-bottom: 1;
+    color: $accent;
+    text-style: bold;
+}
+
+#auth-form Label {
+    margin-top: 1;
+    color: $text-muted;
+}
+
+#auth-form Input {
+    margin-bottom: 0;
+}
+
+#auth-buttons {
+    align: center middle;
+    margin-top: 1;
+    height: auto;
+}
+
+#auth-buttons Button {
+    margin: 0 1;
+}
+
+.forgot-btn {
+    margin-top: 1;
+    width: 100%;
+}
+
+#confirm-forgot-btn {
+    margin-top: 0;
+    width: 100%;
+}
+
+/* --- Record editor screen --------------------------------- */
+
+#editor-container {
+    align: center middle;
+    height: 1fr;
+}
+
+#editor-form {
+    width: 70;
+    height: auto;
+    max-height: 90vh;
+    border: round $accent;
+    padding: 1 2;
+    background: $panel;
+    overflow-y: auto;
+}
+
+#editor-header {
+    text-align: center;
+    margin-bottom: 1;
+    color: $accent;
+    text-style: bold;
+}
+
+#editor-form Label {
+    margin-top: 1;
+    color: $text-muted;
+}
+
+#editor-form Input {
+    margin-bottom: 0;
+}
+
+#editor-form Select {
+    margin-bottom: 0;
+}
+
+#editor-buttons {
+    align: center middle;
+    margin-top: 1;
+    height: auto;
+}
+
+#editor-buttons Button {
+    margin: 0 1;
+}
+
+/* --- Confirm screen --------------------------------------- */
+
+#confirm-container {
+    align: center middle;
+    height: 1fr;
+    background: $background 60%;
+}
+
+#confirm-box {
+    width: 62;
+    height: auto;
+    border: round $warning;
+    padding: 1 2;
+    background: $panel;
+}
+
+#confirm-question {
+    text-align: center;
+    margin-bottom: 1;
+    padding: 0 1;
+}
+
+#confirm-buttons {
+    align: center middle;
+    margin-top: 1;
+    height: auto;
+}
+
+#confirm-buttons Button {
+    margin: 0 1;
+}
+
+/* --- Input modal screen ----------------------------------- */
+
+#input-modal-container {
+    align: center middle;
+    height: 1fr;
+    background: $background 60%;
+}
+
+#input-modal-box {
+    width: 68;
+    height: auto;
+    border: round $accent;
+    padding: 1 2;
+    background: $panel;
+}
+
+#input-modal-prompt {
+    margin-bottom: 1;
+    padding: 0 1;
+    color: $text;
+}
+
+#input-modal-field {
+    margin-bottom: 1;
+}
+
+#input-modal-buttons {
+    align: center middle;
+    margin-top: 1;
+    height: auto;
+}
+
+#input-modal-buttons Button {
+    margin: 0 1;
+}
+
+/* --- History screen --------------------------------------- */
+
+#history-split {
+    height: 1fr;
+}
+
+#history-left {
+    width: 44%;
+    height: 1fr;
+}
+
+#history-table {
+    height: 1fr;
+}
+
+#history-preview {
+    width: 56%;
+    height: 1fr;
+    border-left: solid $accent;
+    padding: 0 1;
+    overflow-y: auto;
+}
+
+#preview-content {
+    padding: 1;
+}
+
+#history-buttons {
+    height: auto;
+    padding: 1 1 0 1;
+}
+
+#history-buttons Button {
+    margin-right: 1;
+}
+
+#history-status {
+    padding: 0 1;
+    height: 1;
+    color: $text-muted;
+}
+
+/* --- Status / info bars ---------------------------------- */
+
+#account-bar,
+#records-zone-bar,
+#plan-zone-bar,
+#accounts-bar,
+#history-bar {
+    background: $accent;
+    color: $text;
+    padding: 0 2;
+    height: 1;
+    text-style: bold;
+}
+
+/* --- Labels ---------------------------------------------- */
+
+.error {
+    color: $error;
+    height: 1;
+}
+
+.muted {
+    color: $text-muted;
+    height: 1;
+}
+
+.warning {
+    color: $warning;
+}
+
+#records-status,
+#plan-status,
+#accounts-status,
+#status-label,
+#history-status {
+    padding: 0 1;
+    color: $text-muted;
+    height: 1;
+}
+
+/* --- Filter input ---------------------------------------- */
+
+#filter-input {
+    margin: 0;
+    border: none;
+    border-bottom: solid $accent;
+}
+
+/* --- Tables ---------------------------------------------- */
+
+DataTable {
+    height: 1fr;
+}
+
+/* --- Plan buttons ---------------------------------------- */
+
+#plan-buttons {
+    height: auto;
+    padding: 1 1 0 1;
+}
+
+#plan-buttons Button {
+    margin-right: 1;
+}
+
+#apply-status {
+    padding: 0 1;
+    height: 1;
+}
+
+/* --- Drift info ------------------------------------------- */
+
+#drift-info {
+    padding: 0 1;
+    height: auto;
+}
+
+/* --- Shared hidden utility -------------------------------- */
+
+.hidden {
+    display: none;
+}

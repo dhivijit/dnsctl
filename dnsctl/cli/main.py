@@ -52,16 +52,19 @@ def _get_engine() -> SyncEngine:
 
 
 def _setup_logging(verbose: bool) -> None:
-    level = logging.DEBUG if verbose else logging.WARNING
-    handlers = [logging.StreamHandler(sys.stderr)]
-    # Also log to file if the logs directory exists
+    handlers: list[logging.Handler] = []
+    if verbose:
+        handlers.append(logging.StreamHandler(sys.stderr))
+    # Always log to file if the logs directory exists
     if LOG_FILE.parent.exists():
         handlers.append(logging.FileHandler(str(LOG_FILE), encoding="utf-8"))
     logging.basicConfig(
-        level=level,
+        level=logging.WARNING,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         handlers=handlers,
     )
+    if verbose:
+        logging.getLogger("dnsctl").setLevel(logging.DEBUG)
 
 
 def _require_token() -> str:
@@ -139,14 +142,23 @@ def login_cmd(label: str | None, acct_alias: str | None) -> None:
         raise SystemExit(1)
     click.echo("Token is valid and active.")
 
-    password = getpass.getpass("Set master password: ")
-    confirm = getpass.getpass("Confirm master password: ")
-    if password != confirm:
-        click.echo("Passwords do not match.", err=True)
-        raise SystemExit(1)
-    if len(password) < 8:
-        click.echo("Password must be at least 8 characters.", err=True)
-        raise SystemExit(1)
+    # Reuse the cached password if a session is already active
+    from dnsctl.core.security import get_cached_password
+    current_alias = get_current_account()
+    cached_pw = get_cached_password(current_alias) if current_alias else None
+
+    if cached_pw is not None:
+        password = cached_pw
+        click.echo("Using existing master password for this account.")
+    else:
+        password = getpass.getpass("Set master password: ")
+        confirm = getpass.getpass("Confirm master password: ")
+        if password != confirm:
+            click.echo("Passwords do not match.", err=True)
+            raise SystemExit(1)
+        if len(password) < 8:
+            click.echo("Password must be at least 8 characters.", err=True)
+            raise SystemExit(1)
 
     init_state_dir()
     add_account(acct_alias, label)
@@ -215,12 +227,15 @@ def sync(zone: str | None) -> None:
 
     git.auto_init()
 
+    zone_counts: list[tuple[str, int]] = []
     for z in targets:
         records = _cf.list_records(token, z["id"])
         state = save_zone(z["id"], z["name"], records, alias)
+        zone_counts.append((z["name"], len(records)))
         click.echo(f"  Synced {z['name']}  ({len(records)} records, hash={state['state_hash'][:12]})")
 
-    sha = git.commit(f"Sync with remote ({len(targets)} zone(s))")
+    from dnsctl.core.commit_messages import sync_message
+    sha = git.commit(sync_message(zone_counts))
     if sha:
         click.echo(f"Committed: {sha[:8]}")
 
@@ -449,7 +464,8 @@ def add_cmd(zone: str | None, rtype: str, rname: str, content: str,
     save_zone(state["zone_id"], zone_name, records, alias)
     git = _get_git()
     git.auto_init()
-    git.commit(f"Add {rtype} {rname}")
+    from dnsctl.core.commit_messages import add_record_message
+    git.commit(add_record_message(record, zone_name))
     click.echo(f"Added {rtype} {rname} → {content}")
     click.echo("Run 'dnsctl plan' to review, then 'dnsctl apply' to push to Cloudflare.")
 
@@ -487,6 +503,7 @@ def edit_cmd(zone: str | None, rname: str, rtype: str, content: str | None,
         raise SystemExit(1)
 
     rec = matches[0]
+    old_rec = dict(rec)  # snapshot before mutation for the commit message
     if content is not None:
         rec["content"] = content
     if ttl is not None:
@@ -504,7 +521,8 @@ def edit_cmd(zone: str | None, rname: str, rtype: str, content: str | None,
     save_zone(state["zone_id"], zone_name, state["records"], alias)
     git = _get_git()
     git.auto_init()
-    git.commit(f"Edit {rtype} {rname}")
+    from dnsctl.core.commit_messages import edit_record_message
+    git.commit(edit_record_message(old_rec, rec, zone_name))
     click.echo(f"Updated {rtype} {rname}")
     click.echo("Run 'dnsctl plan' to review, then 'dnsctl apply' to push to Cloudflare.")
 
@@ -527,21 +545,21 @@ def rm_cmd(zone: str | None, rname: str, rtype: str) -> None:
         click.echo(f"Zone '{zone_name}' not synced.", err=True)
         raise SystemExit(1)
 
-    before = len(state["records"])
+    removed_records = [r for r in state["records"]
+                       if r.get("type") == rtype and r.get("name") == rname]
     state["records"] = [r for r in state["records"]
                         if not (r.get("type") == rtype and r.get("name") == rname)]
-    after = len(state["records"])
 
-    if before == after:
+    if not removed_records:
         click.echo(f"No {rtype} record named '{rname}' found.", err=True)
         raise SystemExit(1)
 
     save_zone(state["zone_id"], zone_name, state["records"], alias)
     git = _get_git()
     git.auto_init()
-    git.commit(f"Delete {rtype} {rname}")
-    removed = before - after
-    click.echo(f"Removed {removed} record(s): {rtype} {rname}")
+    from dnsctl.core.commit_messages import delete_record_message
+    git.commit(delete_record_message(removed_records[0], zone_name))
+    click.echo(f"Removed {len(removed_records)} record(s): {rtype} {rname}")
     click.echo("Run 'dnsctl plan' to review, then 'dnsctl apply' to push to Cloudflare.")
 
 
@@ -610,7 +628,7 @@ def export_cmd(zone: str | None, outfile: str | None) -> None:
     """Export a zone's state to a JSON file."""
     from pathlib import Path
 
-    zone_name = _resolve_single_zone(zone)
+    zone_name = _resolve_single_zone(zone, _get_alias())
 
     if outfile is None:
         outfile = f"{zone_name}.export.json"
@@ -646,7 +664,8 @@ def import_cmd(file: str) -> None:
 
         git = _get_git()
         git.auto_init()
-        sha = git.commit(f"Imported state for {zone_name}")
+        from dnsctl.core.commit_messages import import_message
+        sha = git.commit(import_message(zone_name, n))
         if sha:
             click.echo(f"Committed: {sha[:8]}")
     except ValueError as exc:
@@ -828,7 +847,11 @@ def accounts_remove_cmd(alias: str) -> None:
 # ======================================================================
 
 def main() -> None:
-    """Entry point wrapper — catches Ctrl+C for a clean exit."""
+    """Entry point wrapper — no args opens TUI, otherwise delegates to CLI."""
+    if len(sys.argv) == 1:
+        from dnsctl.tui.app import run_tui
+        run_tui()
+        return
     try:
         cli(standalone_mode=True)
     except KeyboardInterrupt:

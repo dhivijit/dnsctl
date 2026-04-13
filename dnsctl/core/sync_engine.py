@@ -226,10 +226,43 @@ class SyncEngine:
 
             self._git.auto_init()
             self._git.commit(
-                f"Applied changes to {plan.zone_name} ({plan.summary})"
+                _build_apply_message(plan, result)
             )
         except Exception as exc:
             logger.error("Post-apply sync failed: %s", exc)
             result.sync_failed = True
 
         return result
+
+
+# ---------------------------------------------------------------------------
+# Commit message helpers
+# ---------------------------------------------------------------------------
+
+def _fmt_ttl(ttl) -> str:
+    return "Auto" if ttl == 1 else str(ttl)
+
+
+def _build_apply_message(plan: "Plan", result: "ApplyResult") -> str:
+    """Build a detailed git commit message for an apply operation."""
+    subject = f"Apply {plan.summary} to {plan.zone_name}"
+    lines: list[str] = []
+    symbols = {"create": "+", "update": "~", "delete": "-"}
+    for action in result.succeeded:
+        sym = symbols.get(action.action, "?")
+        rec = action.record
+        rtype = rec.get("type", "")
+        name = rec.get("name", "")
+        content = rec.get("content", "")
+        if action.action == "update" and action.before:
+            old = action.before.get("content", "")
+            lines.append(f"{sym} UPDATE  {rtype}  {name}  {old} → {content}")
+        else:
+            verb = action.action.upper()
+            lines.append(f"{sym} {verb:6}  {rtype}  {name}  {content}")
+    for action, err in result.failed:
+        rec = action.record
+        lines.append(
+            f"! FAILED  {rec.get('type','')}  {rec.get('name','')}  ({err})"
+        )
+    return subject + "\n\n" + "\n".join(lines)

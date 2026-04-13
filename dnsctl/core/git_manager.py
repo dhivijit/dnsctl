@@ -71,15 +71,24 @@ class GitManager:
     # ------------------------------------------------------------------
 
     def log(self, max_count: int = 50) -> list[dict]:
-        """Return recent commits as a list of dicts."""
+        """Return recent commits as a list of dicts.
+
+        Each entry has:
+        - ``title``   — first line of the commit message (safe for table display)
+        - ``message`` — full message including any detail body (backward-compatible:
+                        old single-line commits have ``title == message``)
+        """
         repo = self.repo
         commits = []
         for c in repo.iter_commits(max_count=max_count):
+            full = c.message.strip()
+            title = full.split("\n")[0]
             commits.append(
                 {
                     "sha": c.hexsha,
                     "short_sha": c.hexsha[:8],
-                    "message": c.message.strip(),
+                    "title": title,
+                    "message": full,
                     "author": str(c.author),
                     "date": c.committed_datetime.isoformat(),
                 }
@@ -99,27 +108,92 @@ class GitManager:
 
         Raises ``ValueError`` if *commit_sha* cannot be resolved.
         """
+        from pathlib import Path as _Path
+
         repo = self.repo
         try:
             target = repo.commit(commit_sha)
         except Exception as exc:
             raise ValueError(f"Cannot resolve commit '{commit_sha}': {exc}") from exc
 
-        # Checkout the tree of the target commit onto the index
-        repo.git.checkout(target.hexsha, "--", ".")
+        head_sha = repo.head.commit.hexsha
+        logger.debug(
+            "Rollback: target=%s  head=%s  repo=%s",
+            target.hexsha[:8], head_sha[:8], self._dir,
+        )
 
-        # Stage everything (picks up restored files *and* removals)
-        repo.git.add(A=True)
+        try:
+            # ------------------------------------------------------------------
+            # Step 1 — delete files that exist in HEAD but not in the target.
+            #
+            # `git checkout <sha> -- .` only restores files that *exist* in the
+            # target tree; it never removes files that were *added* after it.
+            # Without this step, a rollback past a sync (new zone file added)
+            # would leave the new zone file in place and produce nothing to commit.
+            # ------------------------------------------------------------------
+            target_paths = {
+                item.path
+                for item in target.tree.traverse()
+                if item.type == "blob"
+            }
+            head_paths = {
+                item.path
+                for item in repo.head.commit.tree.traverse()
+                if item.type == "blob"
+            }
+            to_delete = head_paths - target_paths
+            logger.debug("Rollback: files to delete (added after target): %s", to_delete)
+            for rel in to_delete:
+                full = self._dir / _Path(rel)
+                if full.exists():
+                    logger.debug("Rollback: deleting %s", rel)
+                    full.unlink()
 
-        if not repo.is_dirty(index=True, untracked_files=True):
-            # Already identical — nothing to commit
-            return target.hexsha
+            # ------------------------------------------------------------------
+            # Step 2 — restore every file from the target tree.
+            # ------------------------------------------------------------------
+            logger.debug("Rollback: checking out target tree")
+            repo.git.checkout(target.hexsha, "--", ".")
 
-        author = Actor(GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL)
-        msg = f"Rollback to {target.hexsha[:8]}"
-        c = repo.index.commit(msg, author=author, committer=author)
-        logger.info("Rolled back to %s (%s)", target.hexsha[:8], c.hexsha[:8])
-        return c.hexsha
+            # ------------------------------------------------------------------
+            # Step 3 — stage all changes (modifications, deletions, and the
+            # explicit file removals from step 1).
+            # ------------------------------------------------------------------
+            logger.debug("Rollback: staging all changes")
+            repo.git.add(A=True)
+
+            # ------------------------------------------------------------------
+            # Step 4 — check for staged changes using diff --cached rather than
+            # is_dirty(), which compares working-tree vs index (always clean after
+            # add -A) instead of index vs HEAD.
+            # ------------------------------------------------------------------
+            staged_files = repo.git.diff("--cached", "--name-only").strip()
+            logger.debug("Rollback: staged files = %r", staged_files)
+
+            if not staged_files:
+                logger.info(
+                    "Rollback: nothing to commit — working tree already matches %s",
+                    target.hexsha[:8],
+                )
+                return target.hexsha
+
+            author = Actor(GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL)
+            target_title = target.message.strip().split("\n")[0]
+            msg = (
+                f"Rollback to {target.hexsha[:8]}\n\n"
+                f"Restored state from commit {target.hexsha[:8]}\n"
+                f"{target_title}"
+            )
+            c = repo.index.commit(msg, author=author, committer=author)
+            logger.info(
+                "Rollback complete: %s → %s (new commit %s)",
+                head_sha[:8], target.hexsha[:8], c.hexsha[:8],
+            )
+            return c.hexsha
+
+        except Exception as exc:
+            logger.exception("Rollback failed (target=%s)", target.hexsha[:8])
+            raise ValueError(f"Rollback failed: {exc}") from exc
 
     # ------------------------------------------------------------------
     # Show a file at a given commit

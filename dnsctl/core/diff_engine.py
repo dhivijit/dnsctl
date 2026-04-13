@@ -46,8 +46,8 @@ def record_key(record: dict) -> tuple:
     Used as fallback when Cloudflare record IDs are not available
     (e.g. locally-created records that haven't been pushed yet).
     """
-    rtype = record["type"]
-    name = record["name"]
+    rtype = record.get("type", "")
+    name = record.get("name", "")
     content = record.get("content", "")
     if rtype == "MX":
         return (rtype, name, content, record.get("priority", 0))
@@ -60,16 +60,17 @@ def record_key(record: dict) -> tuple:
 
 def _comparable(record: dict) -> dict:
     """Extract the fields that matter for equality comparison."""
+    rtype = record.get("type", "")
     result = {
-        "type": record["type"],
-        "name": record["name"],
+        "type": rtype,
+        "name": record.get("name", ""),
         "content": record.get("content", ""),
         "ttl": record.get("ttl", 1),
         "proxied": record.get("proxied", False),
     }
-    if record["type"] == "MX":
+    if rtype == "MX":
         result["priority"] = record.get("priority", 0)
-    elif record["type"] == "SRV":
+    elif rtype == "SRV":
         result["priority"] = record.get("priority", 0)
         result["data"] = record.get("data", {})
     return result

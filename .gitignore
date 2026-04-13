@@ -6,3 +6,4 @@ build/
 dist/
 *.whl
 *.tar.gz
+tests/

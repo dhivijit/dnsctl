@@ -77,11 +77,14 @@ class SyncWorker(QThread):
             init_state_dir()
             self._git.auto_init()
 
+            zone_counts: list[tuple[str, int]] = []
             for z in zones:
                 records = self._cf.list_records(self._token, z["id"])
                 save_zone(z["id"], z["name"], records, self._alias)
+                zone_counts.append((z["name"], len(records)))
 
-            self._git.commit(f"Sync with remote ({len(zones)} zone(s))")
+            from dnsctl.core.commit_messages import sync_message
+            self._git.commit(sync_message(zone_counts))
 
             # Set default zone for this account if not yet set
             cfg = get_config()
@@ -472,7 +475,10 @@ class MainController:
         if record is None:
             return
         self._record_ctrl.add_record(record)
-        self._save_current_records()
+        info = self._current_zone_info()
+        if info:
+            from dnsctl.core.commit_messages import add_record_message
+            self._save_current_records(add_record_message(record, info[0]))
         self._apply_protect_change(record, protect_info)
         self._window.statusbar.showMessage(
             f"Added {record['type']} {record['name']}")
@@ -481,11 +487,15 @@ class MainController:
         old = self._record_ctrl.get_selected_record()
         if old is None:
             return
+        old_snapshot = dict(old)  # snapshot before the editor may mutate it
         updated, protect_info = self._open_record_editor(existing=old)
         if updated is None:
             return
         self._record_ctrl.update_record(old, updated)
-        self._save_current_records()
+        info = self._current_zone_info()
+        if info:
+            from dnsctl.core.commit_messages import edit_record_message
+            self._save_current_records(edit_record_message(old_snapshot, updated, info[0]))
         self._apply_protect_change(updated, protect_info)
         self._window.statusbar.showMessage(
             f"Updated {updated['type']} {updated['name']}")
@@ -503,13 +513,16 @@ class MainController:
         if answer != QMessageBox.StandardButton.Yes:
             return
         self._record_ctrl.delete_record(rec)
-        self._save_current_records()
+        info = self._current_zone_info()
+        if info:
+            from dnsctl.core.commit_messages import delete_record_message
+            self._save_current_records(delete_record_message(rec, info[0]))
         self._window.editRecordButton.setEnabled(False)
         self._window.deleteRecordButton.setEnabled(False)
         self._window.statusbar.showMessage(
             f"Deleted {rec.get('type')} {rec.get('name')}")
 
-    def _save_current_records(self) -> None:
+    def _save_current_records(self, message: str) -> None:
         """Persist the current in-memory records back to the local zone JSON."""
         info = self._current_zone_info()
         if info is None:
@@ -518,7 +531,7 @@ class MainController:
         records = self._record_ctrl.records
         save_zone(zone_id, zone_name, records, self._alias)
         self._git.auto_init()
-        self._git.commit(f"Local record edit in {zone_name}")
+        self._git.commit(message)
         self._set_drift_badge("local", "● Local changes")
 
     def _apply_protect_change(self, record: dict, protect_info: tuple | None) -> None:
@@ -658,7 +671,8 @@ class MainController:
             zone_name = state["zone_name"]
             n = len(state.get("records", []))
             self._git.auto_init()
-            self._git.commit(f"Imported state for {zone_name}")
+            from dnsctl.core.commit_messages import import_message
+            self._git.commit(import_message(zone_name, n))
             self._populate_zone_combo()
             self._window.zoneComboBox.setCurrentText(zone_name)
             self._load_current_zone()

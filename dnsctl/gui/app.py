@@ -5,7 +5,15 @@ import platform
 import sys
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+try:
+    from PyQt6.QtCore import Qt, QThread, pyqtSignal
+except ImportError:
+    print(
+        "error: the dnsctl GUI requires the [gui] extra.\n"
+        "       Run: pip install dnsctl-app[gui]",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 from PyQt6.QtGui import QIcon, QCursor
 from PyQt6.QtWidgets import QApplication
 from PyQt6 import uic
@@ -66,7 +74,7 @@ def _set_platform_icon():
             # On Windows, we need to set the AppUserModelID to prevent
             # the app from being grouped with python.exe in the taskbar
             import ctypes
-            myappid = 'dhivijit.dnsctl.gui.1.1.1'  # arbitrary string
+            myappid = 'dhivijit.dnsctl.gui.1.2.0'  # arbitrary string
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
         except Exception:
             pass  # Failed to set, continue anyway
@@ -334,8 +342,8 @@ def _show_unlock_dialog(app: QApplication, alias: str = "default", label: str = 
 def main() -> None:
     init_state_dir()
 
-    # Set up file logging
-    handlers: list[logging.Handler] = [logging.StreamHandler(sys.stderr)]
+    # Log to file only — never print to stdout/stderr
+    handlers: list[logging.Handler] = []
     if LOG_FILE.parent.exists():
         handlers.append(logging.FileHandler(str(LOG_FILE), encoding="utf-8"))
     logging.basicConfig(
@@ -343,6 +351,8 @@ def main() -> None:
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         handlers=handlers,
     )
+    # Capture all dnsctl activity (DEBUG+) without flooding with Qt/git noise
+    logging.getLogger("dnsctl").setLevel(logging.DEBUG)
 
     # Set platform-specific icon configuration (must be before QApplication)
     _set_platform_icon()
